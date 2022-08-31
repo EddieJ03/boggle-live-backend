@@ -7,11 +7,15 @@ const express = require('express');
 const app = express();
 const http = require('http');
 const { Server } = require('socket.io');
+
 app.use(require('cors')());
+
 const server = http.createServer(app);
+
 const io = new Server(server, {
+    perMessageDeflate :false,
     cors: {
-        origin: "https://boggle-live.netlify.app",
+        origin: "*",
         methods: ["GET", "POST"]
     }
 });
@@ -315,6 +319,6 @@ io.on('connection', client => {
     }
 })
 
-server.listen(8000, () => {
+server.listen(process.env.PORT || 3000, () => {
     console.log("Server is running on port 8000!");
 })
