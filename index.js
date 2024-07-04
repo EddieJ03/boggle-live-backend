@@ -1,24 +1,17 @@
+// server.js
 const Trie = require('./Trie.js');
-
 const COMMON = require('./common.js');
 const { BOGGLE_1992, BOGGLE_1983 } = require('./boards.js');
 
 const express = require('express');
 const app = express();
 const http = require('http');
-const { Server } = require('socket.io');
+const WebSocket = require('ws');
 
 app.use(require('cors')());
 
 const server = http.createServer(app);
-
-const io = new Server(server, {
-    perMessageDeflate :false,
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
-});
+const wss = new WebSocket.Server({ server });
 
 const NUM = 4;
 
@@ -33,53 +26,54 @@ class Tile {
     }
 }
 
-io.on('connection', client => {    
-    client.on('newGame', newGame);
-    client.on('joinGame', joinGame);
-    client.on('submitWord', submitWord);
-    client.on('disconnect', () => {
-      if(client.roomName) {
-        let gameData = clientRooms[client.roomName];
-        if(gameData) {
-          clearInterval(gameData.timerId);
-          clearTimeout(gameData.timeOut);
-          io.sockets.in(client.roomName)
-                .emit('disconnected');
-          delete clientRooms[client.roomName];
+wss.on('connection', ws => {
+    console.log("IP: ", ws._socket.remoteAddress);
+
+    ws.on('close', () => {
+        console.log('Client disconnected');
+        handleDisconnect(ws);
+    });
+
+    ws.on('message', message => {
+        const data = JSON.parse(message);
+
+        switch (data.type) {
+            case 'newGame':
+                newGame(ws);
+                break;
+            case 'joinGame':
+                joinGame(ws, data.roomName);
+                break;
+            case 'submitWord':
+                submitWord(ws, data);
+                break;
+            default:
+                break;
         }
-      }
     });
 
     function numberOfClients(roomName) {
-        let room = io.sockets.adapter.rooms.get(roomName);
-        
-        if(room) {
-            return room.size;
-        }
-
-        return 0;
+        const clients = Array.from(wss.clients).filter(client => client.roomName === roomName);
+        return clients.length;
     }
 
-    function joinGame(roomName) {    
+    function joinGame(ws, roomName) {    
         let numClients = numberOfClients(roomName);
-    
-        if (numClients === 0) {
-          client.emit('unknownCode');
-          return;
-        } else if (numClients > 1) {
-          client.emit('tooManyPlayers');
-          return;
-        }
-    
-        clientRooms[client.id] = roomName;
-    
-        client.join(roomName);
-        client.number = 2;
-        client.roomName = roomName;
 
-        // gives back to ONLY client
-        client.emit('init', 2);
-        
+        if (numClients === 0) {
+            ws.send(JSON.stringify({ type: 'unknownCode' }));
+            return;
+        } else if (numClients > 1) {
+            ws.send(JSON.stringify({ type: 'tooManyPlayers' }));
+            return;
+        }
+
+        clientRooms[ws.id] = roomName;
+
+        ws.roomName = roomName;
+        ws.number = 2;
+
+        ws.send(JSON.stringify({ type: 'init', number: 2 }));
         startGame(roomName);
     }
 
@@ -93,61 +87,55 @@ io.on('connection', client => {
         return result;
     }
 
-    function newGame() {
+    function newGame(ws) {
         for(const item in COMMON) {
-          commonTrie.add(`${item}`)
+            commonTrie.add(`${item}`);
         }
-        
+
         let roomName = makeid(15);
 
-        // send game code to client
-        client.emit('gameCode', roomName);
-    
-        client.join(roomName);
-        client.number = 1;
+        ws.send(JSON.stringify({ type: 'gameCode', roomName }));
 
-        // add room to client object
-        client.roomName = roomName;
+        ws.roomName = roomName;
+        ws.number = 1;
 
         initGame(roomName);
 
-        // gives back to ONLY client
-        client.emit('init', 1);
+        ws.send(JSON.stringify({ type: 'init', number: 1 }));
     }
 
     function initGame(roomName) {
         for(const item in COMMON) {
-            commonTrie.add(`${item}`)
+            commonTrie.add(`${item}`);
         }
 
         let constGrid = [], allCharacters = [];
 
         for(let i = 0; i < NUM; i++) {
-          constGrid.push(new Array());
+            constGrid.push(new Array());
         }
 
-        let chosenBoggle = Math.floor(Math.random() * 2) === 0 ? BOGGLE_1992 : BOGGLE_1983
+        let chosenBoggle = Math.floor(Math.random() * 2) === 0 ? BOGGLE_1992 : BOGGLE_1983;
 
         for (let i = 0; i < NUM * NUM; i++) {
-          let rand = Math.floor(Math.random() * 6);
-          let char = chosenBoggle[i].substring(rand, rand + 1);
-          char = char === 'Q' ? char + 'u' : char;
-          constGrid[Math.floor(i / 4)].push(char);
-          allCharacters.push(char);
+            let rand = Math.floor(Math.random() * 6);
+            let char = chosenBoggle[i].substring(rand, rand + 1);
+            char = char === 'Q' ? char + 'u' : char;
+            constGrid[Math.floor(i / 4)].push(char);
+            allCharacters.push(char);
         }
 
         let allValidWords = findAllValidWords(constGrid);
 
         let totalScore = calculateTotalPossibleScore(allValidWords);
 
-        // add information to clientRoom
         clientRooms[roomName] = {
-            allCharacters: allCharacters, 
-            allValidWords: allValidWords, 
+            allCharacters: allCharacters,
+            allValidWords: allValidWords,
             totalScore: totalScore,
             player1: 0,
             player2: 0,
-        }
+        };
     }
 
     function calculateTotalPossibleScore(allValidWords) {
@@ -182,7 +170,7 @@ io.on('connection', client => {
         
         return words;
     }
-    
+
     function dfs(i, j, constGrid) {
         let s = new Tile(i, j);
         
@@ -242,28 +230,27 @@ io.on('connection', client => {
         // all possible words
         return words;
     }
-    
-      // add all adjacent cells to current cell in an array and return the array
+
     function adj2(i, j) {
-          let adj = [];
-    
-          if (i > 0) {
-              adj.push(new Tile(i - 1, j));
-              if (j > 0) adj.push(new Tile(i - 1, j - 1));
-              if (j < NUM - 1) adj.push(new Tile(i - 1, j + 1));
-          }
-    
-          if (i < NUM - 1) {
-              adj.push(new Tile(i + 1, j));
-              if (j > 0) adj.push(new Tile(i + 1, j - 1));
-              if (j < NUM - 1) adj.push(new Tile(i + 1, j + 1));
-          }
-    
-          if (j > 0) adj.push(new Tile(i, j - 1));
-          if (j < NUM - 1) adj.push(new Tile(i, j + 1));
-    
-          return adj;
-    }
+        let adj = [];
+  
+        if (i > 0) {
+            adj.push(new Tile(i - 1, j));
+            if (j > 0) adj.push(new Tile(i - 1, j - 1));
+            if (j < NUM - 1) adj.push(new Tile(i - 1, j + 1));
+        }
+  
+        if (i < NUM - 1) {
+            adj.push(new Tile(i + 1, j));
+            if (j > 0) adj.push(new Tile(i + 1, j - 1));
+            if (j < NUM - 1) adj.push(new Tile(i + 1, j + 1));
+        }
+  
+        if (j > 0) adj.push(new Tile(i, j - 1));
+        if (j < NUM - 1) adj.push(new Tile(i, j + 1));
+  
+        return adj;
+  }
 
     function startGame(roomName) {
         let minute = 2;
@@ -273,15 +260,17 @@ io.on('connection', client => {
 
         let room = clientRooms[roomName];
 
-        io.sockets.in(roomName)
-            .emit('start', {
-                countdown: [3, 0], 
-                gameInfo: clientRooms[roomName]
-            });
+        broadcast(roomName, {
+            type: 'start',
+            countdown: [3, 0],
+            gameInfo: clientRooms[roomName]
+        });
 
         let timerId = setInterval(() => {
-            io.sockets.in(roomName)
-                .emit('time', [minute, seconds]);
+            broadcast(roomName, {
+                type: 'time',
+                time: [minute, seconds]
+            });
             if(seconds === 0) {
                 seconds = 59;
                 minute -= 1;
@@ -290,12 +279,14 @@ io.on('connection', client => {
             }
         }, 1000);
 
-        // after x number of seconds stop
-        let timeOut = setTimeout(() => { 
-            clearInterval(timerId);  
-            let gameData = clientRooms[client.roomName];
-            io.sockets.in(client.roomName)
-                .emit('endgame', {player1: gameData.player1, player2: gameData.player2});
+        let timeOut = setTimeout(() => {
+            clearInterval(timerId);
+            let gameData = clientRooms[ws.roomName];
+            broadcast(ws.roomName, {
+                type: 'endgame',
+                player1: gameData.player1,
+                player2: gameData.player2
+            });
             delete clientRooms[roomName];
         }, countdown * 1000);
 
@@ -303,22 +294,49 @@ io.on('connection', client => {
         room.timeOut = timeOut;
     }
 
-    function submitWord(data) {
-        let room = clientRooms[client.roomName];
+    function submitWord(ws, data) {
+        let room = clientRooms[ws.roomName];
 
-        // update scores and switch turn
-        if(client.number === 1) {
-          room.player1 = data.score;
-          io.sockets.in(client.roomName)
-                .emit('switch', {player: 2, word: data.word});
+        if(ws.number === 1) {
+            room.player1 = data.score;
+            broadcast(ws.roomName, {
+                type: 'switch',
+                player: 2,
+                word: data.word
+            });
         } else {
-          room.player2 = data.score;
-          io.sockets.in(client.roomName)
-                .emit('switch', {player: 1, word: data.word});
-        }   
+            room.player2 = data.score;
+            broadcast(ws.roomName, {
+                type: 'switch',
+                player: 1,
+                word: data.word
+            });
+        }
     }
-})
 
-server.listen(process.env.PORT || 3000, () => {
-    console.log("Server is running on port 8000!");
-})
+    function handleDisconnect(ws) {
+        if(ws.roomName) {
+            let gameData = clientRooms[ws.roomName];
+            if(gameData) {
+                clearInterval(gameData.timerId);
+                clearTimeout(gameData.timeOut);
+                broadcast(ws.roomName, {
+                    type: 'disconnected'
+                });
+                delete clientRooms[ws.roomName];
+            }
+        }
+    }
+
+    function broadcast(roomName, data) {
+        wss.clients.forEach(client => {
+            if(client.readyState === WebSocket.OPEN && client.roomName === roomName) {
+                client.send(JSON.stringify(data));
+            }
+        });
+    }
+});
+
+server.listen(process.env.PORT || 5000, () => {
+    console.log("Server is running on port 5000!");
+});
