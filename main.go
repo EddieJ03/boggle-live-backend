@@ -5,8 +5,11 @@ import (
 	"math/rand"
 	"time"
 	"fmt"
+	"net/http"
+	"encoding/json"
 
-	"go_boggle_server/boards"
+	"github.com/rs/cors"
+	"github.com/gorilla/websocket"
 )
 
 var BOGGLE_1992 = []string{
@@ -56,11 +59,24 @@ type Room struct {
 	TimeOut       *time.Timer
 }
 
+type WSClient struct {
+	Conn     *websocket.Conn
+	RoomName string
+	Number   int
+}
+
+type Message struct {
+	Type string
+	RoomName string
+}
+
 var clientRooms = make(map[string]*Room)
 
 var NUM = 4
 
 var commonTrie = trie.NewTrie()
+
+var upgrader = websocket.Upgrader{}
 
 func initGame(roomName string) {
 	constGrid := make([][]string, NUM)
@@ -213,21 +229,107 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
+func handleConnections(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	defer conn.Close()
+
+	wsClient := &WSClient{Conn: conn}
+	wsClient.HandleClient()
+}
+
+func (c *WSClient) HandleClient() {
+	fmt.Println("IP:", c.Conn.RemoteAddr())
+
+	c.Conn.SetCloseHandler(func(code int, text string) error {
+		fmt.Println("Client disconnected")
+		c.handleDisconnect()
+		return nil
+	})
+
+	for {
+		_, msg, err := c.Conn.ReadMessage()
+		if err != nil {
+			fmt.Println(err)
+			break
+		}
+
+		var data Message
+		err = json.Unmarshal(msg, &data)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+
+		switch data.Type {
+		case "newGame":
+			c.newGame()
+		case "joinGame":
+			c.joinGame(data.RoomName)
+		case "submitWord":
+			c.submitWord(data)
+		default:
+			continue
+		}
+	}
+}
+
+func (c *WSClient) newGame() {
+
+}
+
+func (c *WSClient) joinGame(roomName string) {
+	
+}
+
+func (c *WSClient) submitWord(data Message) {
+	
+}
+
+func (c *WSClient) handleDisconnect() {
+	
+}
+
+
+// used in joinGame
+func startGame(roomName string) {
+
+}
+
+// used in joinGame
+func numberOfClients(roomName string) {
+
+}
+
+// used in newGame
+func makeID(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+	rand.Seed(time.Now().UnixNano())
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[rand.Intn(len(charset))]
+	}
+	return string(b)
+}
+
 func main() {
-	common := boards.Common
-	nursery := boards.Nursery
-	shakespeare := boards.Shakespeare
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", handleConnections)
+	handler := cors.Default().Handler(mux)
 
-	for key, value := range common {
-        fmt.Printf("Key: %s, Value: %t\n", key, value)
-    }
+	server := &http.Server{
+		Addr:    ":5000",
+		Handler: handler,
+	}
 
-	for key, value := range nursery {
-        fmt.Printf("Key: %s, Value: %t\n", key, value)
-    }
+	fmt.Println("Server is running on port 5000!")
 
-	for key, value := range shakespeare {
-        fmt.Printf("Key: %s, Value: %t\n", key, value)
-    }
+	server.ListenAndServe()
 }
 
