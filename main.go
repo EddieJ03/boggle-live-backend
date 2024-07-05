@@ -54,8 +54,8 @@ type Room struct {
 	AllCharacters []string
 	AllValidWords []string
 	TotalScore    int
-	Player1       int
-	Player2       int
+	Player1       int // score for player 1
+	Player2       int // score for player 2
 	TimerID       *time.Timer
 	TimeOut       *time.Timer
 }
@@ -359,7 +359,7 @@ func (c *WSClient) joinGame(roomName string) {
 		"number": numClients + 1,
 	})
 
-	c.startGame()
+	startGame(roomName)
 }
 
 func (c *WSClient) submitWord(data SubmitWordMessage) {
@@ -423,8 +423,8 @@ func (c *WSClient) handleDisconnect() {
 
 
 // used in joinGame
-func (c *WSClient) startGame() {
-	
+func startGame(roomName string) {
+
 }
 
 // used in joinGame
