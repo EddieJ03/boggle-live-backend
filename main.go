@@ -1,15 +1,16 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"go_boggle_server/boards"
 	"go_boggle_server/trie"
 	"math/rand"
-	"time"
-	"fmt"
 	"net/http"
-	"encoding/json"
+	"time"
 
-	"github.com/rs/cors"
 	"github.com/gorilla/websocket"
+	"github.com/rs/cors"
 )
 
 var BOGGLE_1992 = []string{
@@ -65,14 +66,24 @@ type WSClient struct {
 	Number   int
 }
 
-type Message struct {
+type JoinGameMessage struct {
 	Type string
 	RoomName string
 }
 
+type NewGameMessage struct {
+	Type string
+}
+
+type SubmitWordMessage struct {
+	Type string
+	Word string
+	Score int
+}
+
 var clientRooms = make(map[string]*Room)
 
-var NUM = 4
+const NUM = 4
 
 var commonTrie = trie.NewTrie()
 
@@ -259,19 +270,42 @@ func (c *WSClient) HandleClient() {
 			break
 		}
 
-		var data Message
+		var data map[string]interface{}
 		err = json.Unmarshal(msg, &data)
+
 		if err != nil {
 			fmt.Println(err)
 			continue
 		}
 
-		switch data.Type {
+		msgType, ok := data["Type"].(string)
+		if !ok {
+			fmt.Println("Invalid type for message Type")
+			continue
+		}
+
+		switch msgType {
 		case "newGame":
 			c.newGame()
 		case "joinGame":
+			var data JoinGameMessage
+			err = json.Unmarshal(msg, &data)
+
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+
 			c.joinGame(data.RoomName)
 		case "submitWord":
+			var data SubmitWordMessage
+			err = json.Unmarshal(msg, &data)
+
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+			
 			c.submitWord(data)
 		default:
 			continue
@@ -280,30 +314,135 @@ func (c *WSClient) HandleClient() {
 }
 
 func (c *WSClient) newGame() {
+	for item, _ := range boards.Common {
+		commonTrie.Add(item)
+	}
 
+	roomName := makeID(15)
+
+	c.Conn.WriteJSON(map[string]string{
+		"type":     "gameCode",
+		"roomName": roomName,
+	})
+
+	c.RoomName = roomName
+	c.Number = 1
+
+	initGame(roomName)
+
+	c.Conn.WriteJSON(map[string]interface{}{
+		"type":   "init",
+		"number": 1,
+	})
 }
 
 func (c *WSClient) joinGame(roomName string) {
-	
+	numClients := numberOfClients(roomName)
+
+	if numClients == 0 {
+		c.Conn.WriteJSON(map[string]string{
+			"type": "unknownGame",
+		})
+		return
+	} else if numClients > 1 {
+		c.Conn.WriteJSON(map[string]string{
+			"type": "tooManyPlayers",
+		})
+		return
+	}
+
+	c.RoomName = roomName
+	c.Number = numClients + 1
+
+	c.Conn.WriteJSON(map[string]interface{}{
+		"type":   "init",
+		"number": numClients + 1,
+	})
+
+	c.startGame()
 }
 
-func (c *WSClient) submitWord(data Message) {
-	
+func (c *WSClient) submitWord(data SubmitWordMessage) {
+	room, exists := clientRooms[c.RoomName]
+	if !exists {
+		return
+	}
+
+	word := data.Word
+	score := data.Score
+
+	if len(word) < 3 || !contains(room.AllValidWords, word) {
+		c.Conn.WriteJSON(map[string]interface{}{
+			"type":   "score",
+			"score":  room.Player1,
+			"score2": room.Player2,
+		})
+		return
+	}
+
+	room.TotalScore -= score
+	if c.Number == 1 {
+		room.Player1 += score
+	} else {
+		room.Player2 += score
+	}
+
+	c.Conn.WriteJSON(map[string]interface{}{
+		"type":   "score",
+		"score":  room.Player1,
+		"score2": room.Player2,
+	})
 }
 
 func (c *WSClient) handleDisconnect() {
+	if c.RoomName == "" {
+		return
+	}
+
+	room, exists := clientRooms[c.RoomName]
+	if !exists {
+		return
+	}
+
+	if c.Number == 1 {
+		room.Player1 = -1
+	} else {
+		room.Player2 = -1
+	}
+
+	c.Conn.WriteJSON(map[string]interface{}{
+		"type":     "playerDisconnected",
+		"player1":  room.Player1,
+		"player2":  room.Player2,
+	})
+
+	if room.Player1 == -1 && room.Player2 == -1 {
+		delete(clientRooms, c.RoomName)
+	}
+}
+
+
+// used in joinGame
+func (c *WSClient) startGame() {
 	
 }
 
-
 // used in joinGame
-func startGame(roomName string) {
+func numberOfClients(roomName string) int {
+	room, exists := clientRooms[roomName]
+	if !exists {
+		return 0
+	}
 
-}
+	num := 0
+	if room.Player1 != 0 {
+		num++
+	}
+	if room.Player2 != 0 {
+		num++
+	}
 
-// used in joinGame
-func numberOfClients(roomName string) {
-
+	return num
 }
 
 // used in newGame
