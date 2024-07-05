@@ -58,6 +58,8 @@ type Room struct {
 	Player2       int // score for player 2
 	TimerID       *time.Timer
 	TimeOut       *time.Timer
+	Player1WS     *WSClient
+	Player2WS 	  *WSClient
 }
 
 type WSClient struct {
@@ -121,6 +123,8 @@ func initGame(roomName string) {
 		TotalScore:    totalScore,
 		Player1:       0,
 		Player2:       0,
+		Player1WS:     nil,
+		Player2WS:     nil,
 	}
 }
 
@@ -131,6 +135,7 @@ func findAllValidWords(constGrid [][]string) []string {
 	for i := 0; i < NUM; i++ {
 		for j := 0; j < NUM; j++ {
 			newWords := dfs(i, j, constGrid)
+
 			for _, word := range newWords {
 				if !contains(words, word) {
 					words = append(words, word)
@@ -330,6 +335,13 @@ func (c *WSClient) newGame() {
 
 	initGame(roomName)
 
+	room, exists := clientRooms[roomName]
+	if !exists {
+		return
+	}
+
+	room.Player1WS = c
+
 	c.Conn.WriteJSON(map[string]interface{}{
 		"type":   "init",
 		"number": 1,
@@ -359,6 +371,13 @@ func (c *WSClient) joinGame(roomName string) {
 		"number": numClients + 1,
 	})
 
+	room, exists := clientRooms[roomName]
+	if !exists {
+		return
+	}
+
+	room.Player2WS = c
+
 	startGame(roomName)
 }
 
@@ -368,30 +387,13 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
 		return
 	}
 
-	word := data.Word
-	score := data.Score
-
-	if len(word) < 3 || !contains(room.AllValidWords, word) {
-		c.Conn.WriteJSON(map[string]interface{}{
-			"type":   "score",
-			"score":  room.Player1,
-			"score2": room.Player2,
-		})
-		return
-	}
-
-	room.TotalScore -= score
 	if c.Number == 1 {
-		room.Player1 += score
+		room.Player1 = data.Score;
+		broadcastSwitch(c.RoomName, 2, data.Word)
 	} else {
-		room.Player2 += score
+		room.Player2 = data.Score;
+		broadcastSwitch(c.RoomName, 1, data.Word)
 	}
-
-	c.Conn.WriteJSON(map[string]interface{}{
-		"type":   "score",
-		"score":  room.Player1,
-		"score2": room.Player2,
-	})
 }
 
 func (c *WSClient) handleDisconnect() {
@@ -399,32 +401,30 @@ func (c *WSClient) handleDisconnect() {
 		return
 	}
 
-	room, exists := clientRooms[c.RoomName]
+	_, exists := clientRooms[c.RoomName]
 	if !exists {
+		fmt.Println("could not find room to delete after disconnect!")
 		return
 	}
 
-	if c.Number == 1 {
-		room.Player1 = -1
-	} else {
-		room.Player2 = -1
-	}
+	broadcastDisconnect(c.RoomName)
 
-	c.Conn.WriteJSON(map[string]interface{}{
-		"type":     "playerDisconnected",
-		"player1":  room.Player1,
-		"player2":  room.Player2,
-	})
-
-	if room.Player1 == -1 && room.Player2 == -1 {
-		delete(clientRooms, c.RoomName)
-	}
+	delete(clientRooms, c.RoomName);
 }
 
 
 // used in joinGame
 func startGame(roomName string) {
+	// minute := 2;
+	// seconds := 59;
+	// countdown := 181;
 
+	// room, exists := clientRooms[RoomName]
+	// if !exists {
+	// 	return
+	// }
+
+	// TODO: finish startGame
 }
 
 // used in joinGame
@@ -435,10 +435,11 @@ func numberOfClients(roomName string) int {
 	}
 
 	num := 0
-	if room.Player1 != 0 {
+	if room.Player1WS != nil {
 		num++
 	}
-	if room.Player2 != 0 {
+
+	if room.Player2WS != nil {
 		num++
 	}
 
@@ -451,10 +452,44 @@ func makeID(length int) string {
 
 	rand.Seed(time.Now().UnixNano())
 	b := make([]byte, length)
+
 	for i := range b {
 		b[i] = charset[rand.Intn(len(charset))]
 	}
+	
 	return string(b)
+}
+
+func broadcastDisconnect(roomName string) {
+	room, exists := clientRooms[roomName]
+	if !exists {
+		return
+	}
+
+	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
+		"type":   "disconnected",
+	})
+	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
+		"type":   "disconnected",
+	})
+}
+
+func broadcastSwitch(roomName string, player int, word string) {
+	room, exists := clientRooms[roomName]
+	if !exists {
+		return
+	}
+
+	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
+		"type":   "switch",
+		"player": player,
+		"word": word,
+	})
+	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
+		"type":   "switch",
+		"player": player,
+		"word": word,
+	})
 }
 
 func main() {
