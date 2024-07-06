@@ -93,8 +93,6 @@ var (
 
 const NUM = 4
 
-var commonTrie = trie.NewTrie()
-
 var upgrader = websocket.Upgrader{
 	ReadBufferSize: 1024,
 	WriteBufferSize:1024,
@@ -103,7 +101,7 @@ var upgrader = websocket.Upgrader{
     },
 }
 
-func initGame(roomName string) {
+func initGame(roomName string, trie *trie.Trie) {
 	constGrid := make([][]string, NUM)
 	allCharacters := []string{}
 
@@ -126,7 +124,7 @@ func initGame(roomName string) {
 		allCharacters = append(allCharacters, char)
 	}
 
-	allValidWords := findAllValidWords(constGrid)
+	allValidWords := findAllValidWords(constGrid, trie)
 	totalScore := calculateTotalPossibleScore(allValidWords)
 
 	clientRoomsLock.Lock()
@@ -146,12 +144,12 @@ func initGame(roomName string) {
 }
 
 
-func findAllValidWords(constGrid [][]string) []string {
+func findAllValidWords(constGrid [][]string, trie *trie.Trie) []string {
 	words := []string{}
 
 	for i := 0; i < NUM; i++ {
 		for j := 0; j < NUM; j++ {
-			newWords := dfs(i, j, constGrid)
+			newWords := dfs(i, j, constGrid, trie)
 
 			for _, word := range newWords {
 				if !contains(words, word) {
@@ -164,7 +162,7 @@ func findAllValidWords(constGrid [][]string) []string {
 	return words
 }
 
-func dfs(i, j int, constGrid [][]string) []string {
+func dfs(i, j int, constGrid [][]string, trie *trie.Trie) []string {
 	s := Tile{i, j}
 
 	marked := make([][]bool, NUM)
@@ -172,10 +170,10 @@ func dfs(i, j int, constGrid [][]string) []string {
 		marked[i] = make([]bool, NUM)
 	}
 
-	return dfs2(s, constGrid[i][j], marked, constGrid)
+	return dfs2(s, constGrid[i][j], marked, constGrid, trie)
 }
 
-func dfs2(v Tile, prefix string, marked [][]bool, constGrid [][]string) []string {
+func dfs2(v Tile, prefix string, marked [][]bool, constGrid [][]string, commonTrie *trie.Trie) []string {
 	marked[v.I][v.J] = true
 
 	words := []string{}
@@ -188,7 +186,7 @@ func dfs2(v Tile, prefix string, marked [][]bool, constGrid [][]string) []string
 		if !marked[adj.I][adj.J] {
 			newWord := prefix + constGrid[adj.I][adj.J]
 			if commonTrie.ContainsPrefix(newWord) {
-				newWords := dfs2(adj, newWord, marked, constGrid)
+				newWords := dfs2(adj, newWord, marked, constGrid, commonTrie)
 				words = append(words, newWords...)
 			}
 		}
@@ -336,6 +334,8 @@ func (c *WSClient) HandleClient() {
 }
 
 func (c *WSClient) newGame() {
+	var commonTrie = trie.NewTrie()
+
 	for item := range boards.Common {
 		commonTrie.Add(item)
 	}
@@ -350,7 +350,7 @@ func (c *WSClient) newGame() {
 	c.RoomName = roomName
 	c.Number = 1
 
-	initGame(roomName)
+	initGame(roomName, commonTrie)
 
 	room, exists := clientRooms[roomName]
 	if !exists {
