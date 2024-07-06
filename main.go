@@ -1,14 +1,15 @@
 package main
 
 import (
-	"encoding/json"
+	// "encoding/json"
 	"fmt"
 	"go_boggle_server/boards"
 	"go_boggle_server/trie"
 	"math/rand"
 	"net/http"
-	"time"
 	"sync"
+	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 	"github.com/rs/cors"
@@ -55,14 +56,15 @@ type Room struct {
 	AllCharacters []string
 	AllValidWords []string
 	TotalScore    int
-	Player1       int // score for player 1
-	Player2       int // score for player 2
-	TimerID       *time.Timer
-	TimeOut       *time.Timer
+	Player1       float64 // score for player 1
+	Player2       float64 // score for player 2
 	Player1WS     *WSClient
 	Player2WS 	  *WSClient
 	Countdown     [2]int
 	RoomLock      *sync.Mutex
+	RoomName      string
+	Player1MissedTurns int
+	Player2MissedTurns int
 }
 
 type WSClient struct {
@@ -84,7 +86,7 @@ type NewGameMessage struct {
 type SubmitWordMessage struct {
 	Type string
 	Word string
-	Score int
+	Score float64
 }
 
 var (
@@ -141,6 +143,9 @@ func initGame(roomName string, trie *trie.Trie) {
 		Player2WS:     nil,
 		Countdown:	   [2]int{3,0},	
 		RoomLock:      &sync.Mutex{},
+		RoomName:      roomName,
+		Player1MissedTurns: 0,
+		Player2MissedTurns: 0,
 	}
 }
 
@@ -283,7 +288,9 @@ func (c *WSClient) HandleClient() {
 	})
 
 	for {
-		_, msg, err := c.Conn.ReadMessage()
+		var data map[string]interface{}
+
+		err := c.Conn.ReadJSON(&data)
 		if err != nil {
 			fmt.Println(err)
 
@@ -293,16 +300,6 @@ func (c *WSClient) HandleClient() {
 			fmt.Printf("%d error so disconnected\n", c.UniqueNumber)
 
 			break
-		}
-
-		fmt.Println(msg)
-
-		var data map[string]interface{}
-		err = json.Unmarshal(msg, &data)
-
-		if err != nil {
-			fmt.Println(err)
-			continue
 		}
 
 		msgType, ok := data["type"].(string)
@@ -317,25 +314,15 @@ func (c *WSClient) HandleClient() {
 		case "newGame":
 			c.newGame()
 		case "joinGame":
-			var data JoinGameMessage
-			err = json.Unmarshal(msg, &data)
-
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
-
-			c.joinGame(data.RoomName)
+			c.joinGame(data["roomName"].(string))
 		case "submitWord":
-			var data SubmitWordMessage
-			err = json.Unmarshal(msg, &data)
-
-			if err != nil {
-				fmt.Println(err)
-				continue
+			swm := SubmitWordMessage{
+				Type: data["type"].(string),
+				Word: data["word"].(string),
+				Score: data["score"].(float64),
 			}
-			
-			c.submitWord(data)
+
+			c.submitWord(swm)
 		default:
 			continue
 		}
@@ -391,7 +378,6 @@ func (c *WSClient) joinGame(roomName string) {
 
 	// one new player at a time should be here
 	room.RoomLock.Lock()
-	defer room.RoomLock.Unlock()
 
 	numClients := numberOfClients(room)
 
@@ -419,9 +405,10 @@ func (c *WSClient) joinGame(roomName string) {
 	})
 
 	fmt.Printf("%d is player %d in room %s\n", c.UniqueNumber, c.Number, c.RoomName)
+	
+	room.RoomLock.Unlock()
 
-
-	startGame(roomName)
+	startGame(room)
 }
 
 func (c *WSClient) submitWord(data SubmitWordMessage) {
@@ -433,14 +420,34 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
 		return
 	}
 
-	fmt.Println("switching players in submitWord func!")
-
     if c.Number == 1 {
         fmt.Println("Switching to player 2")
+
+		if utf8.RuneCountInString(data.Word) == 0 {
+			room.Player1MissedTurns += 1
+		} else {
+			room.Player1MissedTurns = 0
+		}
+
+		if room.Player1MissedTurns == 3 {
+			broadcastEndGame(c.RoomName, room.Player1, room.Player2)
+		}
+
         room.Player1 = data.Score
         broadcastSwitch(c.RoomName, 2, data.Word)
     } else {
         fmt.Println("Switching to player 1")
+
+		if utf8.RuneCountInString(data.Word) == 0 {
+			room.Player2MissedTurns += 1
+		} else {
+			room.Player2MissedTurns = 0
+		}
+
+		if room.Player2MissedTurns == 3 {
+			broadcastEndGame(c.RoomName, room.Player1, room.Player2)
+		}
+
         room.Player2 = data.Score
         broadcastSwitch(c.RoomName, 1, data.Word)
     }
@@ -464,76 +471,14 @@ func (c *WSClient) handleDisconnect() {
 }
 
 // used in joinGame
-func startGame(roomName string) {
-	minute := 3;
-	seconds := 0;
-	countdown := 180;
+func startGame(room *Room) {
+	// minute := 3;
+	// seconds := 0;
+	// countdown := 181;
 
-	_, exists := clientRooms[roomName]
-	if !exists {
-		return
-	}
+	roomName := room.RoomName
 
-	broadcastStart(roomName);
-
-	ticker := time.NewTicker(1 * time.Second)
-    timer := time.NewTimer(time.Duration(countdown) * time.Second)
-
-    go func() {
-		fmt.Println("timer goroutine STARTED")
-
-        for {
-            select {
-            case <-ticker.C:
-				clientRoomsLock.RLock()
-
-				// terminate goroutine if room is gone
-				room, exists := clientRooms[roomName]
-				if !exists {
-					fmt.Println("timer goroutine STOPPED cuz room do not exist anymore")
-					clientRoomsLock.RUnlock()
-					return
-				}
-
-				clientRoomsLock.RUnlock()
-
-                broadcastTime(room, minute, seconds)
-
-                if seconds == 0 {
-                    if minute == 0 {
-                        ticker.Stop()
-                        return
-                    }
-
-                    seconds = 59
-                    minute--
-                } else {
-                    seconds--
-                }
-            case <-timer.C:
-                ticker.Stop()
-
-				clientRoomsLock.RLock()
-
-                gameData := clientRooms[roomName]
-
-				clientRoomsLock.RUnlock()
-
-                broadcastEndGame(roomName, gameData.Player1, gameData.Player2)
-
-				clientRoomsLock.Lock()	
-
-                delete(clientRooms, roomName)
-
-				clientRoomsLock.Unlock()
-				
-                return
-            }
-        }
-    }()
-
-    // Keep the main function alive to allow the goroutines to run
-    select {}
+	broadcastStart(roomName)
 }
 
 // used in joinGame
@@ -564,7 +509,7 @@ func makeID(length int) string {
 	return string(b)
 }
 
-func broadcastEndGame(roomName string, player1 int, player2 int) {
+func broadcastEndGame(roomName string, player1 float64, player2 float64) {
 	clientRoomsLock.RLock() 
 
 	room, exists := clientRooms[roomName]
@@ -584,17 +529,6 @@ func broadcastEndGame(roomName string, player1 int, player2 int) {
 		"type": "endgame",
     	"player1": player1,
         "player2": player2,
-	})
-}
-
-func broadcastTime(room *Room, minute int, seconds int) {
-	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
-		"type": "time",
-        "time": []int{minute, seconds},
-	})
-	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
-		"type": "time",
-    	"time": []int{minute, seconds},
 	})
 }
 
