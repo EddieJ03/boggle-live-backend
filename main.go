@@ -530,6 +530,10 @@ func broadcastEndGame(roomName string, player1 float64, player2 float64) {
     	"player1": player1,
         "player2": player2,
 	})
+
+	clientRoomsLock.Lock()
+	delete(clientRooms, roomName)
+	clientRoomsLock.Unlock()
 }
 
 func broadcastDisconnect(roomName string) {
