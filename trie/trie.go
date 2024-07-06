@@ -1,5 +1,7 @@
 package trie
 
+import "fmt"
+
 // Node represents a node in the Trie
 type Node struct {
     IsLast bool
@@ -48,6 +50,11 @@ func (t *Trie) get(x *Node, s string, d int) *Node {
         return x
     }
     c := int(s[d]) - t.OFFSET
+
+    if c > 25 {
+        fmt.Println(s[d])
+    }
+
     return t.get(x.Next[c], s, d+1)
 }
 

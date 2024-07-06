@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/http"
 	"time"
+	"sync"
 
 	"github.com/gorilla/websocket"
 	"github.com/rs/cors"
@@ -60,6 +61,8 @@ type Room struct {
 	TimeOut       *time.Timer
 	Player1WS     *WSClient
 	Player2WS 	  *WSClient
+	Countdown     [2]int
+	RoomLock      *sync.Mutex
 }
 
 type WSClient struct {
@@ -83,13 +86,22 @@ type SubmitWordMessage struct {
 	Score int
 }
 
-var clientRooms = make(map[string]*Room)
+var (
+	clientRooms = make(map[string]*Room)
+	clientRoomsLock sync.Mutex
+)
 
 const NUM = 4
 
 var commonTrie = trie.NewTrie()
 
-var upgrader = websocket.Upgrader{}
+var upgrader = websocket.Upgrader{
+	ReadBufferSize: 1024,
+	WriteBufferSize:1024,
+    CheckOrigin: func(r *http.Request) bool {
+        return true // Allow all origins
+    },
+}
 
 func initGame(roomName string) {
 	constGrid := make([][]string, NUM)
@@ -117,6 +129,9 @@ func initGame(roomName string) {
 	allValidWords := findAllValidWords(constGrid)
 	totalScore := calculateTotalPossibleScore(allValidWords)
 
+	clientRoomsLock.Lock()
+    defer clientRoomsLock.Unlock()
+
 	clientRooms[roomName] = &Room{
 		AllCharacters: allCharacters,
 		AllValidWords: allValidWords,
@@ -125,6 +140,8 @@ func initGame(roomName string) {
 		Player2:       0,
 		Player1WS:     nil,
 		Player2WS:     nil,
+		Countdown:	   [2]int{3,0},	
+		RoomLock:      &sync.Mutex{},
 	}
 }
 
@@ -253,8 +270,6 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defer conn.Close()
-
 	wsClient := &WSClient{Conn: conn}
 	wsClient.HandleClient()
 }
@@ -283,11 +298,13 @@ func (c *WSClient) HandleClient() {
 			continue
 		}
 
-		msgType, ok := data["Type"].(string)
+		msgType, ok := data["type"].(string)
 		if !ok {
 			fmt.Println("Invalid type for message Type")
 			continue
 		}
+
+		fmt.Println("messageType: " + msgType)
 
 		switch msgType {
 		case "newGame":
@@ -319,7 +336,7 @@ func (c *WSClient) HandleClient() {
 }
 
 func (c *WSClient) newGame() {
-	for item, _ := range boards.Common {
+	for item := range boards.Common {
 		commonTrie.Add(item)
 	}
 
@@ -387,19 +404,27 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
 		return
 	}
 
-	if c.Number == 1 {
-		room.Player1 = data.Score;
-		broadcastSwitch(c.RoomName, 2, data.Word)
-	} else {
-		room.Player2 = data.Score;
-		broadcastSwitch(c.RoomName, 1, data.Word)
-	}
+	room.RoomLock.Lock()
+    defer room.RoomLock.Unlock()
+
+    if c.Number == 1 {
+        fmt.Println("Switching to player 2")
+        room.Player1 = data.Score
+        broadcastSwitch(c.RoomName, 2, data.Word)
+    } else {
+        fmt.Println("Switching to player 1")
+        room.Player2 = data.Score
+        broadcastSwitch(c.RoomName, 1, data.Word)
+    }
 }
 
 func (c *WSClient) handleDisconnect() {
 	if c.RoomName == "" {
+		fmt.Println("could not find room to delete after disconnect!")
 		return
 	}
+
+	broadcastDisconnect(c.RoomName)
 
 	_, exists := clientRooms[c.RoomName]
 	if !exists {
@@ -407,16 +432,14 @@ func (c *WSClient) handleDisconnect() {
 		return
 	}
 
-	broadcastDisconnect(c.RoomName)
-
 	delete(clientRooms, c.RoomName);
 }
 
 // used in joinGame
 func startGame(roomName string) {
-	minute := 2;
-	seconds := 59;
-	countdown := 181;
+	minute := 3;
+	seconds := 0;
+	countdown := 180;
 
 	_, exists := clientRooms[roomName]
 	if !exists {
@@ -506,16 +529,29 @@ func broadcastEndGame(roomName string, player1 int, player2 int) {
 		return
 	}
 
-	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
+	err := room.Player1WS.Conn.WriteJSON(map[string]interface{}{
 		"type": "endgame",
         "player1": player1,
     	"player2": player2,
 	})
-	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
+
+	if err != nil {
+		fmt.Println("Error writing message:", err)
+		// Optionally close the connection on error
+		return
+	}
+
+	err2 := room.Player2WS.Conn.WriteJSON(map[string]interface{}{
 		"type": "endgame",
     	"player1": player1,
         "player2": player2,
 	})
+
+	if err2 != nil {
+		fmt.Println("Error writing message:", err2)
+		// Optionally close the connection on error
+		return
+	}
 }
 
 func broadcastTime(room *Room, minute int, seconds int) {
@@ -581,7 +617,7 @@ func broadcastStart(roomName string) {
 
 func main() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", handleConnections)
+	mux.HandleFunc("/", handleConnections)
 	handler := cors.Default().Handler(mux)
 
 	server := &http.Server{
