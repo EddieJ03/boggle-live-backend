@@ -1,6 +1,7 @@
 package trie
 
 import "fmt"
+import "strings"
 
 // Node represents a node in the Trie
 type Node struct {
@@ -29,7 +30,8 @@ func (t *Trie) Add(s string) {
 
 // ContainsWord checks if the Trie contains the entire word
 func (t *Trie) ContainsWord(s string) bool {
-    x := t.get(t.root, s, 0)
+    upperS := strings.ToUpper(s)
+    x := t.get(t.root, upperS, 0)
     if x == nil {
         return false
     }
@@ -38,7 +40,9 @@ func (t *Trie) ContainsWord(s string) bool {
 
 // ContainsPrefix checks if the Trie contains the prefix
 func (t *Trie) ContainsPrefix(s string) bool {
-    return t.get(t.root, s, 0) != nil
+    upperS := strings.ToUpper(s)
+
+    return t.get(t.root, upperS, 0) != nil
 }
 
 // get retrieves a node for a given string
@@ -52,7 +56,7 @@ func (t *Trie) get(x *Node, s string, d int) *Node {
     c := int(s[d]) - t.OFFSET
 
     if c > 25 {
-        fmt.Println(s[d])
+        fmt.Printf("%c\n",s[d])
     }
 
     return t.get(x.Next[c], s, d+1)

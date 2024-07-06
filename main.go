@@ -66,9 +66,10 @@ type Room struct {
 }
 
 type WSClient struct {
-	Conn     *websocket.Conn
-	RoomName string
-	Number   int
+	Conn           *websocket.Conn
+	RoomName       string
+	UniqueNumber   int
+	Number         int
 }
 
 type JoinGameMessage struct {
@@ -268,16 +269,16 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	wsClient := &WSClient{Conn: conn}
+	wsClient := &WSClient{Conn: conn, RoomName: "", UniqueNumber: rand.Int(), Number: -1}
 	wsClient.HandleClient()
 }
 
 func (c *WSClient) HandleClient() {
-	fmt.Println("IP:", c.Conn.RemoteAddr())
+	fmt.Printf("%d connected\n", c.UniqueNumber)
 
 	c.Conn.SetCloseHandler(func(code int, text string) error {
-		fmt.Println("Client disconnected")
 		c.handleDisconnect()
+		fmt.Printf("%d closed so disconnected\n", c.UniqueNumber)
 		return nil
 	})
 
@@ -285,8 +286,16 @@ func (c *WSClient) HandleClient() {
 		_, msg, err := c.Conn.ReadMessage()
 		if err != nil {
 			fmt.Println(err)
+
+			// disconnect both when error
+			c.handleDisconnect()
+
+			fmt.Printf("%d error so disconnected\n", c.UniqueNumber)
+
 			break
 		}
+
+		fmt.Println(msg)
 
 		var data map[string]interface{}
 		err = json.Unmarshal(msg, &data)
@@ -298,7 +307,7 @@ func (c *WSClient) HandleClient() {
 
 		msgType, ok := data["type"].(string)
 		if !ok {
-			fmt.Println("Invalid type for message Type")
+			fmt.Printf("%s is nvalid type for message Type\n", msgType)
 			continue
 		}
 
@@ -342,13 +351,13 @@ func (c *WSClient) newGame() {
 
 	roomName := makeID(15)
 
+	c.RoomName = roomName
+	c.Number = 1
+
 	c.Conn.WriteJSON(map[string]string{
 		"type":     "gameCode",
 		"roomName": roomName,
 	})
-
-	c.RoomName = roomName
-	c.Number = 1
 
 	initGame(roomName, commonTrie)
 
@@ -360,52 +369,57 @@ func (c *WSClient) newGame() {
 		return
 	}
 
-	room.RoomLock.Lock()
-	defer room.RoomLock.Unlock()
-
 	room.Player1WS = c
 
 	c.Conn.WriteJSON(map[string]interface{}{
 		"type":   "init",
 		"number": 1,
 	})
+
+	fmt.Printf("%d is player %d in room %s\n", c.UniqueNumber, c.Number, c.RoomName)
 }
 
 func (c *WSClient) joinGame(roomName string) {
-	numClients := numberOfClients(roomName)
+	clientRoomsLock.RLock()
+	defer clientRoomsLock.RUnlock()
 
-	if numClients == 0 {
+	room, exists := clientRooms[roomName]
+	if !exists {
+		fmt.Println("Room " + roomName + " does not exist!")
+		return
+	}
+
+	// one new player at a time should be here
+	room.RoomLock.Lock()
+	defer room.RoomLock.Unlock()
+
+	numClients := numberOfClients(room)
+
+	if numClients == 0 || numClients == -1 {
+		fmt.Println("Room " + roomName + " has 0 players??!")
 		c.Conn.WriteJSON(map[string]string{
 			"type": "unknownGame",
 		})
 		return
 	} else if numClients > 1 {
+		fmt.Println("Room " + roomName + " has too many players??!")
 		c.Conn.WriteJSON(map[string]string{
 			"type": "tooManyPlayers",
 		})
 		return
 	}
 
+	c.Number = 2
 	c.RoomName = roomName
-	c.Number = numClients + 1
+	room.Player2WS = c
 
 	c.Conn.WriteJSON(map[string]interface{}{
 		"type":   "init",
-		"number": numClients + 1,
+		"number": 2,
 	})
 
-	clientRoomsLock.RLock()
-	defer clientRoomsLock.RUnlock()
+	fmt.Printf("%d is player %d in room %s\n", c.UniqueNumber, c.Number, c.RoomName)
 
-	room, exists := clientRooms[roomName]
-	if !exists {
-		return
-	}
-
-	room.RoomLock.Lock()
-	defer room.RoomLock.Unlock()
-
-	room.Player2WS = c
 
 	startGame(roomName)
 }
@@ -419,8 +433,7 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
 		return
 	}
 
-	room.RoomLock.Lock()
-    defer room.RoomLock.Unlock()
+	fmt.Println("switching players in submitWord func!")
 
     if c.Number == 1 {
         fmt.Println("Switching to player 2")
@@ -435,19 +448,19 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
 
 func (c *WSClient) handleDisconnect() {
 	if c.RoomName == "" {
-		fmt.Println("could not find room to delete after disconnect!")
+		fmt.Printf("%d could not find room %s to delete after disconnect!\n", c.Number, c.RoomName)
 		return
 	}
 
 	broadcastDisconnect(c.RoomName)
+	
+	clientRoomsLock.Lock()	
 
-	_, exists := clientRooms[c.RoomName]
-	if !exists {
-		fmt.Println("could not find room to delete after disconnect!")
-		return
-	}
+	delete(clientRooms, c.RoomName)
 
-	delete(clientRooms, c.RoomName);
+	clientRoomsLock.Unlock()
+
+	fmt.Printf("%d found room %s to delete after disconnect!\n", c.Number, c.RoomName)
 }
 
 // used in joinGame
@@ -467,17 +480,22 @@ func startGame(roomName string) {
     timer := time.NewTimer(time.Duration(countdown) * time.Second)
 
     go func() {
+		fmt.Println("timer goroutine STARTED")
+
         for {
             select {
             case <-ticker.C:
 				clientRoomsLock.RLock()
-				defer clientRoomsLock.RUnlock()
 
 				// terminate goroutine if room is gone
 				room, exists := clientRooms[roomName]
 				if !exists {
+					fmt.Println("timer goroutine STOPPED cuz room do not exist anymore")
+					clientRoomsLock.RUnlock()
 					return
 				}
+
+				clientRoomsLock.RUnlock()
 
                 broadcastTime(room, minute, seconds)
 
@@ -494,11 +512,21 @@ func startGame(roomName string) {
                 }
             case <-timer.C:
                 ticker.Stop()
+
+				clientRoomsLock.RLock()
+
                 gameData := clientRooms[roomName]
+
+				clientRoomsLock.RUnlock()
 
                 broadcastEndGame(roomName, gameData.Player1, gameData.Player2)
 
+				clientRoomsLock.Lock()	
+
                 delete(clientRooms, roomName)
+
+				clientRoomsLock.Unlock()
+				
                 return
             }
         }
@@ -509,15 +537,7 @@ func startGame(roomName string) {
 }
 
 // used in joinGame
-func numberOfClients(roomName string) int {
-	clientRoomsLock.RLock()
-	defer clientRoomsLock.RUnlock()
-	
-	room, exists := clientRooms[roomName]
-	if !exists {
-		return 0
-	}
-
+func numberOfClients(room *Room) int {
 	num := 0
 	if room.Player1WS != nil {
 		num++
@@ -545,37 +565,26 @@ func makeID(length int) string {
 }
 
 func broadcastEndGame(roomName string, player1 int, player2 int) {
-	clientRoomsLock.RLock()
-	defer clientRoomsLock.RUnlock()
+	clientRoomsLock.RLock() 
 
 	room, exists := clientRooms[roomName]
 	if !exists {
 		return
 	}
 
-	err := room.Player1WS.Conn.WriteJSON(map[string]interface{}{
+	clientRoomsLock.RUnlock()
+
+	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
 		"type": "endgame",
         "player1": player1,
     	"player2": player2,
 	})
 
-	if err != nil {
-		fmt.Println("Error writing message:", err)
-		// Optionally close the connection on error
-		return
-	}
-
-	err2 := room.Player2WS.Conn.WriteJSON(map[string]interface{}{
+	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
 		"type": "endgame",
     	"player1": player1,
         "player2": player2,
 	})
-
-	if err2 != nil {
-		fmt.Println("Error writing message:", err2)
-		// Optionally close the connection on error
-		return
-	}
 }
 
 func broadcastTime(room *Room, minute int, seconds int) {
