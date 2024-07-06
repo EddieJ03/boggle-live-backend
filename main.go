@@ -429,11 +429,12 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
 			room.Player1MissedTurns = 0
 		}
 
-		if room.Player1MissedTurns == 3 {
+        room.Player1 = data.Score
+
+		if room.Player1MissedTurns == 3 || room.Player1 + room.Player2 == float64(room.TotalScore) {
 			broadcastEndGame(c.RoomName, room.Player1, room.Player2)
 		}
 
-        room.Player1 = data.Score
         broadcastSwitch(c.RoomName, 2, data.Word)
     } else {
         fmt.Println("Switching to player 1")
@@ -444,11 +445,12 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
 			room.Player2MissedTurns = 0
 		}
 
-		if room.Player2MissedTurns == 3 {
+        room.Player2 = data.Score
+
+		if room.Player2MissedTurns == 3 || room.Player1 + room.Player2 == float64(room.TotalScore) {
 			broadcastEndGame(c.RoomName, room.Player1, room.Player2)
 		}
 
-        room.Player2 = data.Score
         broadcastSwitch(c.RoomName, 1, data.Word)
     }
 }
