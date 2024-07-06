@@ -88,7 +88,7 @@ type SubmitWordMessage struct {
 
 var (
 	clientRooms = make(map[string]*Room)
-	clientRoomsLock sync.Mutex
+	clientRoomsLock sync.RWMutex
 )
 
 const NUM = 4
@@ -352,10 +352,16 @@ func (c *WSClient) newGame() {
 
 	initGame(roomName, commonTrie)
 
+	clientRoomsLock.RLock()
+	defer clientRoomsLock.RUnlock()
+
 	room, exists := clientRooms[roomName]
 	if !exists {
 		return
 	}
+
+	room.RoomLock.Lock()
+	defer room.RoomLock.Unlock()
 
 	room.Player1WS = c
 
@@ -388,10 +394,16 @@ func (c *WSClient) joinGame(roomName string) {
 		"number": numClients + 1,
 	})
 
+	clientRoomsLock.RLock()
+	defer clientRoomsLock.RUnlock()
+
 	room, exists := clientRooms[roomName]
 	if !exists {
 		return
 	}
+
+	room.RoomLock.Lock()
+	defer room.RoomLock.Unlock()
 
 	room.Player2WS = c
 
@@ -399,6 +411,9 @@ func (c *WSClient) joinGame(roomName string) {
 }
 
 func (c *WSClient) submitWord(data SubmitWordMessage) {
+	clientRoomsLock.RLock()
+	defer clientRoomsLock.RUnlock()
+
 	room, exists := clientRooms[c.RoomName]
 	if !exists {
 		return
@@ -455,6 +470,9 @@ func startGame(roomName string) {
         for {
             select {
             case <-ticker.C:
+				clientRoomsLock.RLock()
+				defer clientRoomsLock.RUnlock()
+
 				// terminate goroutine if room is gone
 				room, exists := clientRooms[roomName]
 				if !exists {
@@ -492,6 +510,9 @@ func startGame(roomName string) {
 
 // used in joinGame
 func numberOfClients(roomName string) int {
+	clientRoomsLock.RLock()
+	defer clientRoomsLock.RUnlock()
+	
 	room, exists := clientRooms[roomName]
 	if !exists {
 		return 0
@@ -524,6 +545,9 @@ func makeID(length int) string {
 }
 
 func broadcastEndGame(roomName string, player1 int, player2 int) {
+	clientRoomsLock.RLock()
+	defer clientRoomsLock.RUnlock()
+
 	room, exists := clientRooms[roomName]
 	if !exists {
 		return
@@ -566,6 +590,9 @@ func broadcastTime(room *Room, minute int, seconds int) {
 }
 
 func broadcastDisconnect(roomName string) {
+	clientRoomsLock.RLock()
+	defer clientRoomsLock.RUnlock()
+
 	room, exists := clientRooms[roomName]
 	if !exists {
 		return
@@ -580,6 +607,9 @@ func broadcastDisconnect(roomName string) {
 }
 
 func broadcastSwitch(roomName string, player int, word string) {
+	clientRoomsLock.RLock()
+	defer clientRoomsLock.RUnlock()
+
 	room, exists := clientRooms[roomName]
 	if !exists {
 		return
@@ -598,6 +628,9 @@ func broadcastSwitch(roomName string, player int, word string) {
 }
 
 func broadcastStart(roomName string) {
+	clientRoomsLock.RLock()
+	defer clientRoomsLock.RUnlock()
+
 	room, exists := clientRooms[roomName]
 	if !exists {
 		return
