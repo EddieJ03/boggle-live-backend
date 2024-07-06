@@ -412,19 +412,59 @@ func (c *WSClient) handleDisconnect() {
 	delete(clientRooms, c.RoomName);
 }
 
-
 // used in joinGame
 func startGame(roomName string) {
-	// minute := 2;
-	// seconds := 59;
-	// countdown := 181;
+	minute := 2;
+	seconds := 59;
+	countdown := 181;
 
-	// room, exists := clientRooms[RoomName]
-	// if !exists {
-	// 	return
-	// }
+	_, exists := clientRooms[roomName]
+	if !exists {
+		return
+	}
 
-	// TODO: finish startGame
+	broadcastStart(roomName);
+
+	ticker := time.NewTicker(1 * time.Second)
+    timer := time.NewTimer(time.Duration(countdown) * time.Second)
+
+    go func() {
+        for {
+            select {
+            case <-ticker.C:
+				// terminate goroutine if room is gone
+				room, exists := clientRooms[roomName]
+				if !exists {
+					return
+				}
+
+                broadcastTime(room, minute, seconds)
+
+                if seconds == 0 {
+                    if minute == 0 {
+                        ticker.Stop()
+                        return
+                    }
+
+                    seconds = 59
+                    minute--
+                } else {
+                    seconds--
+                }
+            case <-timer.C:
+                ticker.Stop()
+                gameData := clientRooms[roomName]
+
+                broadcastEndGame(roomName, gameData.Player1, gameData.Player2)
+
+                delete(clientRooms, roomName)
+                return
+            }
+        }
+    }()
+
+    // Keep the main function alive to allow the goroutines to run
+    select {}
 }
 
 // used in joinGame
@@ -460,6 +500,35 @@ func makeID(length int) string {
 	return string(b)
 }
 
+func broadcastEndGame(roomName string, player1 int, player2 int) {
+	room, exists := clientRooms[roomName]
+	if !exists {
+		return
+	}
+
+	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
+		"type": "endgame",
+        "player1": player1,
+    	"player2": player2,
+	})
+	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
+		"type": "endgame",
+    	"player1": player1,
+        "player2": player2,
+	})
+}
+
+func broadcastTime(room *Room, minute int, seconds int) {
+	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
+		"type": "time",
+        "time": []int{minute, seconds},
+	})
+	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
+		"type": "time",
+    	"time": []int{minute, seconds},
+	})
+}
+
 func broadcastDisconnect(roomName string) {
 	room, exists := clientRooms[roomName]
 	if !exists {
@@ -489,6 +558,24 @@ func broadcastSwitch(roomName string, player int, word string) {
 		"type":   "switch",
 		"player": player,
 		"word": word,
+	})
+}
+
+func broadcastStart(roomName string) {
+	room, exists := clientRooms[roomName]
+	if !exists {
+		return
+	}
+
+	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
+		"type":   "start",
+		"countdown": [2]int{3,0},
+		"gameInfo": *room,
+	})
+	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
+		"type":   "start",
+		"countdown": [2]int{3,0},
+		"gameInfo": *room,
 	})
 }
 
