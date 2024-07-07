@@ -109,10 +109,17 @@ func (c *WSClient) newGame(random bool) {
 	c.RoomName = roomName
 	c.Number = 1
 
-	c.Conn.WriteJSON(map[string]string{
-		"type":     "gameCode",
-		"roomName": roomName,
-	})
+	if(!random) {
+		c.Conn.WriteJSON(map[string]string{
+			"type":     "gameCode",
+			"roomName": roomName,
+		})
+	} else {
+		c.Conn.WriteJSON(map[string]string{
+			"type":     "randomWaiting",
+			"roomName": roomName,
+		})
+	}
 
 	initGame(roomName, commonTrie, random)
 
