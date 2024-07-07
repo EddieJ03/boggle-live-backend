@@ -1,3 +1,3 @@
 # Boggle Live Backend
 
-Node server for Boggle Live. Deployed on Render.
+Multithreaded Go server for Boggle Live. Deployed on Render.
