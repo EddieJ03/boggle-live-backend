@@ -190,12 +190,13 @@ func (c *WSClient) joinGame(roomName string) {
 
 func (c *WSClient) submitWord(data SubmitWordMessage) {
 	clientRoomsLock.RLock()
-	defer clientRoomsLock.RUnlock()
 
 	room, exists := clientRooms[c.RoomName]
 	if !exists {
 		return
 	}
+
+	clientRoomsLock.RUnlock()
 
     if c.Number == 1 {
         fmt.Println("Switching to player 2")
@@ -209,7 +210,7 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
         room.Player1 = data.Score
 
 		if room.Player1MissedTurns == 3 || room.Player1 + room.Player2 == float64(room.TotalScore) {
-			broadcastEndGame(c.RoomName, room.Player1, room.Player2)
+			broadcastEndGame(room, room.Player1, room.Player2)
 		}
 
         broadcastSwitch(c.RoomName, 2, data.Word)
@@ -225,7 +226,7 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
         room.Player2 = data.Score
 
 		if room.Player2MissedTurns == 3 || room.Player1 + room.Player2 == float64(room.TotalScore) {
-			broadcastEndGame(c.RoomName, room.Player1, room.Player2)
+			broadcastEndGame(room, room.Player1, room.Player2)
 		}
 
         broadcastSwitch(c.RoomName, 1, data.Word)
@@ -257,19 +258,23 @@ func (c *WSClient) handleDisconnect() {
 }
 
 func (c * WSClient) randomGame() {
+	fmt.Println("inside random game")
 	// hold lock to randomRooms
 	randomRoomsLock.Lock()
-	defer randomRoomsLock.Unlock()
+	fmt.Println("acquired lock in randomGame")
 
 	if len(randomRooms) == 0 {
 		c.newGame(true)
+		randomRoomsLock.Unlock()
+		fmt.Println("released lock in randomGame, len == 0")
 	} else {
 		// pull from list and start random game!
 		var randomRoom *Room = nil
 
 		randomRooms, randomRoom = popFirstRoom(randomRooms)
 
-		fmt.Println(randomRoom)
+		randomRoomsLock.Unlock()
+		fmt.Println("released lock in randomGame")
 
 		c.joinGame(randomRoom.RoomName)
 	}
@@ -280,15 +285,13 @@ func startGame(room *Room) {
 	broadcastStart(roomName)
 }
 
-func broadcastEndGame(roomName string, player1 float64, player2 float64) {
-	clientRoomsLock.RLock() 
+func broadcastEndGame(room *Room, player1 float64, player2 float64) {
+	// delete room first, then send endgame to clients
+	clientRoomsLock.Lock() 
 
-	room, exists := clientRooms[roomName]
-	if !exists {
-		return
-	}
-
-	clientRoomsLock.RUnlock()
+	delete(clientRooms, room.RoomName)
+	
+	clientRoomsLock.Unlock()
 
 	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
 		"type": "endgame",
@@ -301,10 +304,6 @@ func broadcastEndGame(roomName string, player1 float64, player2 float64) {
     	"player1": player1,
         "player2": player2,
 	})
-
-	clientRoomsLock.Lock()
-	delete(clientRooms, roomName)
-	clientRoomsLock.Unlock()
 }
 
 func broadcastDisconnect(roomName string) {
