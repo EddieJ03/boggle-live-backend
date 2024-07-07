@@ -1,97 +1,25 @@
 package main
 
 import (
-	// "encoding/json"
 	"fmt"
 	"go_boggle_server/boards"
 	"go_boggle_server/trie"
+	
 	"math/rand"
 	"net/http"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 	"github.com/rs/cors"
 )
 
-var BOGGLE_1992 = []string{
-    "LRYTTE", "VTHRWE", "EGHWNE", "SEOTIS",
-    "ANAEEG", "IDSYTT", "OATTOW", "MTOICU",
-    "AFPKFS", "XLDERI", "HCPOAS", "ENSIEU",
-    "YLDEVR", "ZNRNHL", "NMIQHU", "OBBAOJ",
-}
-
-// Define the 16 Boggle dice (1983 version)
-var BOGGLE_1983 = []string{
-    "AACIOT", "ABILTY", "ABJMOQ", "ACDEMP",
-    "ACELRS", "ADENVZ", "AHMORS", "BIFORX",
-    "DENOSW", "DKNOTU", "EEFHIY", "EGINTV",
-    "EGKLUY", "EHINPS", "ELPSTU", "GILRUW",
-}
-
-// Define the 25 Boggle Master / Boggle Deluxe dice
-var BOGGLE_MASTER = []string{
-    "AAAFRS", "AAEEEE", "AAFIRS", "ADENNN", "AEEEEM",
-    "AEEGMU", "AEGMNN", "AFIRSY", "BJKQXZ", "CCNSTW",
-    "CEIILT", "CEILPT", "CEIPST", "DDLNOR", "DHHLOR",
-    "DHHNOT", "DHLNOR", "EIIITT", "EMOTTT", "ENSSSU",
-    "FIPRSY", "GORRVW", "HIPRRY", "NOOTUW", "OOOTTU",
-}
-
-// Define the 25 Big Boggle dice
-var BOGGLE_BIG = []string{
-    "AAAFRS", "AAEEEE", "AAFIRS", "ADENNN", "AEEEEM",
-    "AEEGMU", "AEGMNN", "AFIRSY", "BJKQXZ", "CCENST",
-    "CEIILT", "CEILPT", "CEIPST", "DDHNOT", "DHHLOR",
-    "DHLNOR", "DHLNOR", "EIIITT", "EMOTTT", "ENSSSU",
-    "FIPRSY", "GORRVW", "IPRRRY", "NOOTUW", "OOOTTU",
-}
-
-type Tile struct {
-	I, J int
-}
-
-type Room struct {
-	AllCharacters []string
-	AllValidWords []string
-	TotalScore    int
-	Player1       float64 // score for player 1
-	Player2       float64 // score for player 2
-	Player1WS     *WSClient
-	Player2WS 	  *WSClient
-	Countdown     [2]int
-	RoomLock      *sync.Mutex
-	RoomName      string
-	Player1MissedTurns int
-	Player2MissedTurns int
-}
-
-type WSClient struct {
-	Conn           *websocket.Conn
-	RoomName       string
-	UniqueNumber   int
-	Number         int
-}
-
-type JoinGameMessage struct {
-	Type string
-	RoomName string
-}
-
-type NewGameMessage struct {
-	Type string
-}
-
-type SubmitWordMessage struct {
-	Type string
-	Word string
-	Score float64
-}
-
 var (
 	clientRooms = make(map[string]*Room)
 	clientRoomsLock sync.RWMutex
+
+	randomRooms = make([]*Room, 0, 10)
+	randomRoomsLock sync.Mutex
 )
 
 const NUM = 4
@@ -102,168 +30,6 @@ var upgrader = websocket.Upgrader{
     CheckOrigin: func(r *http.Request) bool {
         return true // Allow all origins
     },
-}
-
-func initGame(roomName string, trie *trie.Trie) {
-	constGrid := make([][]string, NUM)
-	allCharacters := []string{}
-
-	for i := 0; i < NUM; i++ {
-		constGrid[i] = []string{}
-	}
-
-	chosenBoggle := BOGGLE_1992
-	if rand.Intn(2) == 0 {
-		chosenBoggle = BOGGLE_1983
-	}
-
-	for i := 0; i < NUM*NUM; i++ {
-		randIndex := rand.Intn(6)
-		char := chosenBoggle[i][randIndex : randIndex+1]
-		if char == "Q" {
-			char += "u"
-		}
-		constGrid[i/NUM] = append(constGrid[i/NUM], char)
-		allCharacters = append(allCharacters, char)
-	}
-
-	allValidWords := findAllValidWords(constGrid, trie)
-	totalScore := calculateTotalPossibleScore(allValidWords)
-
-	clientRoomsLock.Lock()
-    defer clientRoomsLock.Unlock()
-
-	clientRooms[roomName] = &Room{
-		AllCharacters: allCharacters,
-		AllValidWords: allValidWords,
-		TotalScore:    totalScore,
-		Player1:       0,
-		Player2:       0,
-		Player1WS:     nil,
-		Player2WS:     nil,
-		Countdown:	   [2]int{3,0},	
-		RoomLock:      &sync.Mutex{},
-		RoomName:      roomName,
-		Player1MissedTurns: 0,
-		Player2MissedTurns: 0,
-	}
-}
-
-
-func findAllValidWords(constGrid [][]string, trie *trie.Trie) []string {
-	words := []string{}
-
-	for i := 0; i < NUM; i++ {
-		for j := 0; j < NUM; j++ {
-			newWords := dfs(i, j, constGrid, trie)
-
-			for _, word := range newWords {
-				if !contains(words, word) {
-					words = append(words, word)
-				}
-			}
-		}
-	}
-
-	return words
-}
-
-func dfs(i, j int, constGrid [][]string, trie *trie.Trie) []string {
-	s := Tile{i, j}
-
-	marked := make([][]bool, NUM)
-	for i := 0; i < NUM; i++ {
-		marked[i] = make([]bool, NUM)
-	}
-
-	return dfs2(s, constGrid[i][j], marked, constGrid, trie)
-}
-
-func dfs2(v Tile, prefix string, marked [][]bool, constGrid [][]string, commonTrie *trie.Trie) []string {
-	marked[v.I][v.J] = true
-
-	words := []string{}
-
-	if len(prefix) > 2 && commonTrie.ContainsWord(prefix) {
-		words = append(words, prefix)
-	}
-
-	for _, adj := range adj2(v.I, v.J) {
-		if !marked[adj.I][adj.J] {
-			newWord := prefix + constGrid[adj.I][adj.J]
-			if commonTrie.ContainsPrefix(newWord) {
-				newWords := dfs2(adj, newWord, marked, constGrid, commonTrie)
-				words = append(words, newWords...)
-			}
-		}
-	}
-
-	marked[v.I][v.J] = false
-	return words
-}
-
-func adj2(i, j int) []Tile {
-	adj := []Tile{}
-
-	if i > 0 {
-		adj = append(adj, Tile{i - 1, j})
-		if j > 0 {
-			adj = append(adj, Tile{i - 1, j - 1})
-		}
-		if j < NUM-1 {
-			adj = append(adj, Tile{i - 1, j + 1})
-		}
-	}
-
-	if i < NUM-1 {
-		adj = append(adj, Tile{i + 1, j})
-		if j > 0 {
-			adj = append(adj, Tile{i + 1, j - 1})
-		}
-		if j < NUM-1 {
-			adj = append(adj, Tile{i + 1, j + 1})
-		}
-	}
-
-	if j > 0 {
-		adj = append(adj, Tile{i, j - 1})
-	}
-	if j < NUM-1 {
-		adj = append(adj, Tile{i, j + 1})
-	}
-
-	return adj
-}
-
-func calculateTotalPossibleScore(allValidWords []string) int {
-	total := 0
-
-	for _, word := range allValidWords {
-		switch len(word) {
-		case 3, 4:
-			total++
-		case 5:
-			total += 2
-		case 6:
-			total += 3
-		case 7:
-			total += 5
-		default:
-			total += 11
-		}
-	}
-
-	return total
-}
-
-// helper function to find if a slice contains a string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }
 
 func handleConnections(w http.ResponseWriter, r *http.Request) {
@@ -312,7 +78,7 @@ func (c *WSClient) HandleClient() {
 
 		switch msgType {
 		case "newGame":
-			c.newGame()
+			c.newGame(false)
 		case "joinGame":
 			c.joinGame(data["roomName"].(string))
 		case "submitWord":
@@ -323,13 +89,15 @@ func (c *WSClient) HandleClient() {
 			}
 
 			c.submitWord(swm)
+		case "randomGame":
+			c.randomGame()
 		default:
 			continue
 		}
 	}
 }
 
-func (c *WSClient) newGame() {
+func (c *WSClient) newGame(random bool) {
 	var commonTrie = trie.NewTrie()
 
 	for item := range boards.Common {
@@ -346,7 +114,7 @@ func (c *WSClient) newGame() {
 		"roomName": roomName,
 	})
 
-	initGame(roomName, commonTrie)
+	initGame(roomName, commonTrie, random)
 
 	clientRoomsLock.RLock()
 	defer clientRoomsLock.RUnlock()
@@ -469,46 +237,38 @@ func (c *WSClient) handleDisconnect() {
 
 	clientRoomsLock.Unlock()
 
+	randomRoomsLock.Lock()
+
+	// also remove from randomRooms (if exists)
+	randomRooms = removeRoom(randomRooms, findRoomIndex(randomRooms, c.RoomName))
+
+	randomRoomsLock.Unlock()
+
 	fmt.Printf("%d found room %s to delete after disconnect!\n", c.Number, c.RoomName)
 }
 
-// used in joinGame
+func (c * WSClient) randomGame() {
+	// hold lock to randomRooms
+	randomRoomsLock.Lock()
+	defer randomRoomsLock.Unlock()
+
+	if len(randomRooms) == 0 {
+		c.newGame(true)
+	} else {
+		// pull from list and start random game!
+		var randomRoom *Room = nil
+
+		randomRooms, randomRoom = popFirstRoom(randomRooms)
+
+		fmt.Println(randomRoom)
+
+		c.joinGame(randomRoom.RoomName)
+	}
+}
+
 func startGame(room *Room) {
-	// minute := 3;
-	// seconds := 0;
-	// countdown := 181;
-
 	roomName := room.RoomName
-
 	broadcastStart(roomName)
-}
-
-// used in joinGame
-func numberOfClients(room *Room) int {
-	num := 0
-	if room.Player1WS != nil {
-		num++
-	}
-
-	if room.Player2WS != nil {
-		num++
-	}
-
-	return num
-}
-
-// used in newGame
-func makeID(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-
-	rand.Seed(time.Now().UnixNano())
-	b := make([]byte, length)
-
-	for i := range b {
-		b[i] = charset[rand.Intn(len(charset))]
-	}
-	
-	return string(b)
 }
 
 func broadcastEndGame(roomName string, player1 float64, player2 float64) {
