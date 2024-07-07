@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+func startGame(room *Room) {
+	roomName := room.RoomName
+	broadcastStart(roomName)
+}
+
+
 func findAllValidWords(constGrid [][]string, trie *trie.Trie) []string {
 	words := []string{}
 
@@ -230,3 +236,4 @@ func popFirstRoom(rooms []*Room) ([]*Room, *Room) {
     firstRoom := rooms[0]
     return rooms[1:], firstRoom
 }
+

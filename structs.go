@@ -2,8 +2,6 @@ package main
 
 import (
 	"sync"
-
-	"github.com/gorilla/websocket"
 )
 
 type Tile struct {
@@ -23,13 +21,6 @@ type Room struct {
 	RoomName      string
 	Player1MissedTurns int
 	Player2MissedTurns int
-}
-
-type WSClient struct {
-	Conn           *websocket.Conn
-	RoomName       string
-	UniqueNumber   int
-	Number         int
 }
 
 type JoinGameMessage struct {
