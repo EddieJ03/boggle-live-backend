@@ -157,12 +157,14 @@ func (c *WSClient) joinGame(roomName string) {
 	numClients := numberOfClients(room)
 
 	if numClients == 0 || numClients == -1 {
+		room.RoomLock.Unlock()
 		fmt.Println("Room " + roomName + " has 0 players??!")
 		c.Conn.WriteJSON(map[string]string{
 			"type": "unknownGame",
 		})
 		return
 	} else if numClients > 1 {
+		room.RoomLock.Unlock()
 		fmt.Println("Room " + roomName + " has too many players??!")
 		c.Conn.WriteJSON(map[string]string{
 			"type": "tooManyPlayers",
