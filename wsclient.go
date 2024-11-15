@@ -44,7 +44,7 @@ func (c *WSClient) HandleClient() {
 
 		msgType, ok := data["type"].(string)
 		if !ok {
-			fmt.Printf("%s is nvalid type for message Type\n", msgType)
+			fmt.Printf("%s is invalid type for message Type\n", msgType)
 			continue
 		}
 
@@ -115,8 +115,6 @@ func (c *WSClient) newGame(random bool) {
 
 	fmt.Printf("%d is player %d in room %s\n", c.UniqueNumber, c.Number, c.RoomName)
 }
-
-
 
 
 func (c *WSClient) joinGame(roomName string) {

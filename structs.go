@@ -2,6 +2,7 @@ package main
 
 import (
 	"sync"
+	"github.com/segmentio/kafka-go"
 )
 
 type Tile struct {
@@ -21,6 +22,7 @@ type Room struct {
 	RoomName      string
 	Player1MissedTurns int
 	Player2MissedTurns int
+	KafkaWriter    *kafka.Writer
 }
 
 type JoinGameMessage struct {

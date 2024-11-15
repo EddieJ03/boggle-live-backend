@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"go_boggle_server/trie"
+	"log"
 	"math/rand"
 	"sync"
 	"time"
+
+	"github.com/segmentio/kafka-go"
 )
 
 func startGame(room *Room) {
@@ -74,6 +78,11 @@ func initGame(roomName string, trie *trie.Trie, random bool) {
 		RoomName:      roomName,
 		Player1MissedTurns: 0,
 		Player2MissedTurns: 0,
+		KafkaWriter: &kafka.Writer{
+			Addr:     kafka.TCP("localhost:9094"),
+			Topic:   roomName,
+			Balancer: &kafka.LeastBytes{},
+		},
 	}
 
 	clientRooms[roomName] = room
@@ -84,7 +93,6 @@ func initGame(roomName string, trie *trie.Trie, random bool) {
 		randomRooms = append(randomRooms, room)
 	}
 }
-
 
 func dfs(i, j int, constGrid [][]string, trie *trie.Trie) []string {
 	s := Tile{i, j}
@@ -237,3 +245,34 @@ func popFirstRoom(rooms []*Room) ([]*Room, *Room) {
     return rooms[1:], firstRoom
 }
 
+func sendMessage(room *Room, message string) {
+	room.KafkaWriter.WriteMessages(
+		context.Background(),
+		kafka.Message{
+			Value: []byte(message),
+		},
+	)
+}
+
+func deleteTopic(topic string) {
+	conn, err := kafka.Dial("tcp", "localhost:9092")
+
+	if err != nil {
+		log.Println("failed to dial to remove topic" + topic)
+	}
+
+	defer conn.Close()
+
+	// controller, err := conn.Controller()
+	// if err != nil {
+	// 	panic(err.Error())
+	// }
+	// var controllerConn *kafka.Conn
+	// controllerConn, err = kafka.Dial("tcp", net.JoinHostPort(controller.Host, strconv.Itoa(controller.Port)))
+	// if err != nil {
+	// 	panic(err.Error())
+	// }
+	// defer controllerConn.Close()
+
+	conn.DeleteTopics(topic)
+}
