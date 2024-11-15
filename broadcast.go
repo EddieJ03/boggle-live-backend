@@ -34,6 +34,7 @@ func broadcastEndGame(room *Room, player1 float64, player2 float64) {
 
 	sendMessage(room, gameOverMessage)
 	deleteTopic(room.RoomName)
+	room.KafkaWriter.Close()
 }
 
 func broadcastDisconnect(roomName string) {

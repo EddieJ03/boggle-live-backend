@@ -64,6 +64,11 @@ func initGame(roomName string, trie *trie.Trie, random bool) {
 
 	clientRoomsLock.Lock()
     defer clientRoomsLock.Unlock()
+	
+	_, topic_err := kafka.DialLeader(context.Background(), "tcp", "localhost:9094", roomName, 0)
+	if topic_err != nil {
+		log.Printf("failed to ensure topic exists: %s\n", topic_err.Error())
+	}
 
 	room := &Room{
 		AllCharacters: allCharacters,
@@ -81,11 +86,17 @@ func initGame(roomName string, trie *trie.Trie, random bool) {
 		KafkaWriter: &kafka.Writer{
 			Addr:     kafka.TCP("localhost:9094"),
 			Topic:   roomName,
-			Balancer: &kafka.LeastBytes{},
+			RequiredAcks: kafka.RequireAll,
+			Async:        false,
+			BatchSize:    1,
 		},
 	}
 
+	
+
 	clientRooms[roomName] = room
+
+	fmt.Println("successfully created room!")
 
 	// if random, also add to the list
 	if(random) {
@@ -246,16 +257,23 @@ func popFirstRoom(rooms []*Room) ([]*Room, *Room) {
 }
 
 func sendMessage(room *Room, message string) {
-	room.KafkaWriter.WriteMessages(
+	fmt.Println("GAME START KAFKA MESSAGE " + room.KafkaWriter.Topic)
+	err := room.KafkaWriter.WriteMessages(
 		context.Background(),
 		kafka.Message{
 			Value: []byte(message),
 		},
 	)
+
+	if err != nil {
+		fmt.Println(err.Error())
+	} else{
+		fmt.Println("message sent good!")
+	}
 }
 
 func deleteTopic(topic string) {
-	conn, err := kafka.Dial("tcp", "localhost:9092")
+	conn, err := kafka.Dial("tcp", "localhost:9094")
 
 	if err != nil {
 		log.Println("failed to dial to remove topic" + topic)
