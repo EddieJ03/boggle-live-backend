@@ -19,6 +19,7 @@ type WSClient struct {
 
 
 func (c *WSClient) HandleClient() {
+	defer c.Conn.Close()
 	fmt.Printf("%d connected\n", c.UniqueNumber)
 
 	c.Conn.SetCloseHandler(func(code int, text string) error {
