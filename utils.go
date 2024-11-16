@@ -257,7 +257,6 @@ func popFirstRoom(rooms []*Room) ([]*Room, *Room) {
 }
 
 func sendMessage(room *Room, message string) {
-	fmt.Println("GAME START KAFKA MESSAGE " + room.KafkaWriter.Topic)
 	err := room.KafkaWriter.WriteMessages(
 		context.Background(),
 		kafka.Message{

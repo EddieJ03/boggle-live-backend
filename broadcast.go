@@ -25,11 +25,11 @@ func broadcastEndGame(room *Room, player1 float64, player2 float64) {
 	gameOverMessage := "GAME OVER!"
 
 	if room.Player1MissedTurns == 3 {
-		gameOverMessage = gameOverMessage + "\n Player 1 Missed 3 Consecutive Turns"
+		gameOverMessage = gameOverMessage + "\nPlayer 1 Missed 3 Consecutive Turns"
 	} else if room.Player2MissedTurns == 3 {
-		gameOverMessage = gameOverMessage + "\n Player 2 Missed 3 Consecutive Turns"
+		gameOverMessage = gameOverMessage + "\nPlayer 2 Missed 3 Consecutive Turns"
 	} else {
-		gameOverMessage = gameOverMessage + "\n All possible words found!"
+		gameOverMessage = gameOverMessage + "\nAll possible words found!"
 	}
 
 	sendMessage(room, gameOverMessage)
@@ -57,7 +57,7 @@ func broadcastDisconnect(roomName string) {
 	deleteTopic(room.RoomName)
 }
 
-func broadcastSwitch(roomName string, player int, word string) {
+func broadcastSwitch(roomName string, curr_player int, next_player int, word string) {
 	clientRoomsLock.RLock()
 	defer clientRoomsLock.RUnlock()
 
@@ -68,16 +68,16 @@ func broadcastSwitch(roomName string, player int, word string) {
 
 	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
 		"type":   "switch",
-		"player": player,
+		"player": next_player,
 		"word":   word,
 	})
 	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
 		"type":   "switch",
-		"player": player,
+		"player": next_player,
 		"word":   word,
 	})
-
-	sendMessage(room, fmt.Sprintf("Player %d found word %s. Switching from Player %d to %d", 1-player, word, 1-player, player))
+																								
+	sendMessage(room, fmt.Sprintf("Player %d found word %s. Switching from Player %d to %d", curr_player, word, curr_player, next_player))
 }
 
 func broadcastStart(roomName string) {

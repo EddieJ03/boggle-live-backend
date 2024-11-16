@@ -189,7 +189,7 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
 			broadcastEndGame(room, room.Player1, room.Player2)
 		}
 
-        broadcastSwitch(c.RoomName, 2, data.Word)
+        broadcastSwitch(c.RoomName, 1, 2, data.Word)
     } else {
         fmt.Println("Switching to player 1")
 
@@ -205,7 +205,7 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
 			broadcastEndGame(room, room.Player1, room.Player2)
 		}
 
-        broadcastSwitch(c.RoomName, 1, data.Word)
+        broadcastSwitch(c.RoomName, 2, 1, data.Word)
     }
 }
 

@@ -22,7 +22,7 @@ type Room struct {
 	RoomName      string
 	Player1MissedTurns int
 	Player2MissedTurns int
-	KafkaWriter    *kafka.Writer
+	KafkaWriter    *kafka.Writer `json:"-"` // add this so KafkaWriter does not get JSON serialized
 }
 
 type JoinGameMessage struct {
