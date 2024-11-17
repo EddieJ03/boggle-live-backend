@@ -19,6 +19,7 @@ type WSClient struct {
 
 
 func (c *WSClient) HandleClient() {
+	defer c.Conn.Close()
 	fmt.Printf("%d connected\n", c.UniqueNumber)
 
 	c.Conn.SetCloseHandler(func(code int, text string) error {
@@ -44,7 +45,7 @@ func (c *WSClient) HandleClient() {
 
 		msgType, ok := data["type"].(string)
 		if !ok {
-			fmt.Printf("%s is nvalid type for message Type\n", msgType)
+			fmt.Printf("%s is invalid type for message Type\n", msgType)
 			continue
 		}
 
@@ -115,8 +116,6 @@ func (c *WSClient) newGame(random bool) {
 
 	fmt.Printf("%d is player %d in room %s\n", c.UniqueNumber, c.Number, c.RoomName)
 }
-
-
 
 
 func (c *WSClient) joinGame(roomName string) {
@@ -191,7 +190,7 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
 			broadcastEndGame(room, room.Player1, room.Player2)
 		}
 
-        broadcastSwitch(c.RoomName, 2, data.Word)
+        broadcastSwitch(c.RoomName, 1, 2, data.Word)
     } else {
         fmt.Println("Switching to player 1")
 
@@ -207,7 +206,7 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
 			broadcastEndGame(room, room.Player1, room.Player2)
 		}
 
-        broadcastSwitch(c.RoomName, 1, data.Word)
+        broadcastSwitch(c.RoomName, 2, 1, data.Word)
     }
 }
 
