@@ -87,7 +87,7 @@ func initGame(roomName string, trie *trie.Trie, random bool) {
 			Addr:     kafka.TCP("localhost:9094"),
 			Topic:   roomName,
 			RequiredAcks: kafka.RequireAll,
-			Async:        false,
+			Async:        true,
 			BatchSize:    1,
 		},
 	}
@@ -257,18 +257,12 @@ func popFirstRoom(rooms []*Room) ([]*Room, *Room) {
 }
 
 func sendMessage(room *Room, message string) {
-	err := room.KafkaWriter.WriteMessages(
+	room.KafkaWriter.WriteMessages(
 		context.Background(),
 		kafka.Message{
 			Value: []byte(message),
 		},
 	)
-
-	if err != nil {
-		fmt.Println(err.Error())
-	} else{
-		fmt.Println("message sent good!")
-	}
 }
 
 func deleteTopic(topic string) {
