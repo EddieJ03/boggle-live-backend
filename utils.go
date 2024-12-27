@@ -257,6 +257,7 @@ func popFirstRoom(rooms []*Room) ([]*Room, *Room) {
 }
 
 func sendMessage(room *Room, message string) {
+	print("kafka sending message " + message + "\n")
 	room.KafkaWriter.WriteMessages(
 		context.Background(),
 		kafka.Message{

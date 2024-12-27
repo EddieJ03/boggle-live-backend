@@ -10,18 +10,6 @@ func broadcastEndGame(room *Room, player1 float64, player2 float64) {
 
 	clientRoomsLock.Unlock()
 
-	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
-		"type":    "endgame",
-		"player1": player1,
-		"player2": player2,
-	})
-
-	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
-		"type":    "endgame",
-		"player1": player1,
-		"player2": player2,
-	})
-
 	gameOverMessage := "GAME OVER!"
 
 	if room.Player1MissedTurns == 3 {
@@ -33,6 +21,19 @@ func broadcastEndGame(room *Room, player1 float64, player2 float64) {
 	}
 
 	sendMessage(room, gameOverMessage)
+
+	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
+		"type":    "endgame",
+		"player1": player1,
+		"player2": player2,
+	})
+
+	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
+		"type":    "endgame",
+		"player1": player1,
+		"player2": player2,
+	})
+	
 	deleteTopic(room.RoomName)
 	room.KafkaWriter.Close()
 }
@@ -76,8 +77,12 @@ func broadcastSwitch(roomName string, curr_player int, next_player int, word str
 		"player": next_player,
 		"word":   word,
 	})
-																								
-	sendMessage(room, fmt.Sprintf("Player %d found word %s. Switching from Player %d to %d", curr_player, word, curr_player, next_player))
+
+	if word == "" {
+		sendMessage(room, fmt.Sprintf("Player %d could not find word. Switching from Player %d to %d", curr_player, curr_player, next_player))
+	} else {
+		sendMessage(room, fmt.Sprintf("Player %d found word %s. Switching from Player %d to %d", curr_player, word, curr_player, next_player))
+	}
 }
 
 func broadcastStart(roomName string) {
