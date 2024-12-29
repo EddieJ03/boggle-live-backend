@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"go_boggle_server/trie"
 	"log"
 	"math/rand"
@@ -11,6 +10,9 @@ import (
 
 	"github.com/segmentio/kafka-go"
 )
+
+// change this endpoint depending on where server is (ex: localhost:9094)
+var endpoint string = "52.160.91.109:9094"
 
 func startGame(room *Room) {
 	roomName := room.RoomName
@@ -65,11 +67,6 @@ func initGame(roomName string, trie *trie.Trie, random bool) {
 	clientRoomsLock.Lock()
     defer clientRoomsLock.Unlock()
 	
-	_, topic_err := kafka.DialLeader(context.Background(), "tcp", "localhost:9094", roomName, 0)
-	if topic_err != nil {
-		log.Printf("failed to ensure topic exists: %s\n", topic_err.Error())
-	}
-
 	room := &Room{
 		AllCharacters: allCharacters,
 		AllValidWords: allValidWords,
@@ -83,24 +80,29 @@ func initGame(roomName string, trie *trie.Trie, random bool) {
 		RoomName:      roomName,
 		Player1MissedTurns: 0,
 		Player2MissedTurns: 0,
-		KafkaWriter: &kafka.Writer{
-			Addr:     kafka.TCP("localhost:9094"),
+	}
+
+	_, topic_err := kafka.DialLeader(context.Background(), "tcp", endpoint, roomName, 0) // this creates topic since the kafka config is set to auto topic creation
+	if topic_err != nil {
+		room.KafkaWriter = nil
+		log.Printf("failed to create topic: %s\n", topic_err.Error())
+	} else {
+		room.KafkaWriter = &kafka.Writer{
+			Addr:     kafka.TCP(endpoint),
 			Topic:   roomName,
 			RequiredAcks: kafka.RequireAll,
 			Async:        true,
 			BatchSize:    1,
-		},
+		}
 	}
-
-	
 
 	clientRooms[roomName] = room
 
-	fmt.Println("successfully created room!")
+	// fmt.Println("successfully created room!")
 
 	// if random, also add to the list
 	if(random) {
-		fmt.Println("added to random!")
+		// fmt.Println("added to random!")
 		randomRooms = append(randomRooms, room)
 	}
 }
@@ -257,6 +259,10 @@ func popFirstRoom(rooms []*Room) ([]*Room, *Room) {
 }
 
 func sendMessage(room *Room, message string) {
+	if room.KafkaWriter == nil {
+		return
+	}
+
 	room.KafkaWriter.WriteMessages(
 		context.Background(),
 		kafka.Message{
@@ -266,24 +272,14 @@ func sendMessage(room *Room, message string) {
 }
 
 func deleteTopic(topic string) {
-	conn, err := kafka.Dial("tcp", "localhost:9094")
+	conn, err := kafka.Dial("tcp", endpoint)
 
 	if err != nil {
-		log.Println("failed to dial to remove topic" + topic)
+		log.Println("failed to dial to remove topic " + topic)
+		return
 	}
 
 	defer conn.Close()
-
-	// controller, err := conn.Controller()
-	// if err != nil {
-	// 	panic(err.Error())
-	// }
-	// var controllerConn *kafka.Conn
-	// controllerConn, err = kafka.Dial("tcp", net.JoinHostPort(controller.Host, strconv.Itoa(controller.Port)))
-	// if err != nil {
-	// 	panic(err.Error())
-	// }
-	// defer controllerConn.Close()
 
 	conn.DeleteTopics(topic)
 }

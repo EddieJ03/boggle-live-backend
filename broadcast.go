@@ -22,20 +22,26 @@ func broadcastEndGame(room *Room, player1 float64, player2 float64) {
 
 	sendMessage(room, gameOverMessage)
 
-	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
-		"type":    "endgame",
-		"player1": player1,
-		"player2": player2,
-	})
-
-	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
-		"type":    "endgame",
-		"player1": player1,
-		"player2": player2,
-	})
+	if room.Player1WS != nil {
+		room.Player1WS.Conn.WriteJSON(map[string]interface{}{
+			"type":    "endgame",
+			"player1": player1,
+			"player2": player2,
+		})
+	}
 	
-	deleteTopic(room.RoomName)
-	room.KafkaWriter.Close()
+	if room.Player2WS != nil {
+		room.Player2WS.Conn.WriteJSON(map[string]interface{}{
+			"type":    "endgame",
+			"player1": player1,
+			"player2": player2,
+		})
+	}
+	
+	if room.KafkaWriter != nil {
+		deleteTopic(room.RoomName)
+		room.KafkaWriter.Close()
+	}
 }
 
 func broadcastDisconnect(roomName string) {
@@ -55,7 +61,11 @@ func broadcastDisconnect(roomName string) {
 	})
 
 	sendMessage(room, "Someone disconnected! This game has ended.")
-	deleteTopic(room.RoomName)
+	
+	if room.KafkaWriter != nil {
+		deleteTopic(room.RoomName)
+		room.KafkaWriter.Close()
+	}
 }
 
 func broadcastSwitch(roomName string, curr_player int, next_player int, word string) {
