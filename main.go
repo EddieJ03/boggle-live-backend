@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	
+
 	"math/rand"
 	"net/http"
 	"sync"
@@ -23,7 +23,7 @@ const NUM = 4
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize: 1024,
-	WriteBufferSize:1024,
+	WriteBufferSize: 1024,
     CheckOrigin: func(r *http.Request) bool {
         return true // Allow all origins
     },
@@ -37,7 +37,13 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	wsClient := &WSClient{Conn: conn, RoomName: "", UniqueNumber: rand.Int(), Number: -1}
+	wsClient := &WSClient{
+		Conn: conn, 
+		RoomName: "", 
+		UniqueNumber: rand.Int(), 
+		Number: -1, 
+	}
+
 	wsClient.HandleClient()
 }
 

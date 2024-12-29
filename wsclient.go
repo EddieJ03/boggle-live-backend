@@ -17,8 +17,8 @@ type WSClient struct {
 	Number         int
 }
 
-
 func (c *WSClient) HandleClient() {
+	defer c.Conn.Close()
 	fmt.Printf("%d connected\n", c.UniqueNumber)
 
 	c.Conn.SetCloseHandler(func(code int, text string) error {
@@ -44,11 +44,11 @@ func (c *WSClient) HandleClient() {
 
 		msgType, ok := data["type"].(string)
 		if !ok {
-			fmt.Printf("%s is nvalid type for message Type\n", msgType)
+			// fmt.Printf("%s is invalid type for message Type\n", msgType)
 			continue
 		}
 
-		fmt.Println("messageType: " + msgType)
+		// fmt.Println("messageType: " + msgType)
 
 		switch msgType {
 		case "newGame":
@@ -117,15 +117,15 @@ func (c *WSClient) newGame(random bool) {
 }
 
 
-
-
 func (c *WSClient) joinGame(roomName string) {
 	clientRoomsLock.RLock()
 	defer clientRoomsLock.RUnlock()
 
 	room, exists := clientRooms[roomName]
 	if !exists {
-		fmt.Println("Room " + roomName + " does not exist!")
+		c.Conn.WriteJSON(map[string]string{
+			"type": "unknownGame",
+		})
 		return
 	}
 
@@ -136,14 +136,14 @@ func (c *WSClient) joinGame(roomName string) {
 
 	if numClients == 0 || numClients == -1 {
 		room.RoomLock.Unlock()
-		fmt.Println("Room " + roomName + " has 0 players??!")
+		// fmt.Println("Room " + roomName + " has 0 players??!")
 		c.Conn.WriteJSON(map[string]string{
 			"type": "unknownGame",
 		})
 		return
 	} else if numClients > 1 {
 		room.RoomLock.Unlock()
-		fmt.Println("Room " + roomName + " has too many players??!")
+		// fmt.Println("Room " + roomName + " has too many players??!")
 		c.Conn.WriteJSON(map[string]string{
 			"type": "tooManyPlayers",
 		})
@@ -177,7 +177,7 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
 	clientRoomsLock.RUnlock()
 
     if c.Number == 1 {
-        fmt.Println("Switching to player 2")
+        // fmt.Println("Switching to player 2")
 
 		if utf8.RuneCountInString(data.Word) == 0 {
 			room.Player1MissedTurns += 1
@@ -191,9 +191,9 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
 			broadcastEndGame(room, room.Player1, room.Player2)
 		}
 
-        broadcastSwitch(c.RoomName, 2, data.Word)
+        broadcastSwitch(c.RoomName, 1, 2, data.Word)
     } else {
-        fmt.Println("Switching to player 1")
+        // fmt.Println("Switching to player 1")
 
 		if utf8.RuneCountInString(data.Word) == 0 {
 			room.Player2MissedTurns += 1
@@ -207,7 +207,7 @@ func (c *WSClient) submitWord(data SubmitWordMessage) {
 			broadcastEndGame(room, room.Player1, room.Player2)
 		}
 
-        broadcastSwitch(c.RoomName, 1, data.Word)
+        broadcastSwitch(c.RoomName, 2, 1, data.Word)
     }
 }
 
@@ -236,15 +236,12 @@ func (c *WSClient) handleDisconnect() {
 }
 
 func (c * WSClient) randomGame() {
-	fmt.Println("inside random game")
 	// hold lock to randomRooms
 	randomRoomsLock.Lock()
-	fmt.Println("acquired lock in randomGame")
 
 	if len(randomRooms) == 0 {
 		c.newGame(true)
 		randomRoomsLock.Unlock()
-		fmt.Println("released lock in randomGame, len == 0")
 	} else {
 		// pull from list and start random game!
 		var randomRoom *Room = nil
@@ -252,7 +249,6 @@ func (c * WSClient) randomGame() {
 		randomRooms, randomRoom = popFirstRoom(randomRooms)
 
 		randomRoomsLock.Unlock()
-		fmt.Println("released lock in randomGame")
 
 		c.joinGame(randomRoom.RoomName)
 	}

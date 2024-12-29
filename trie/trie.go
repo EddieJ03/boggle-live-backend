@@ -1,6 +1,5 @@
 package trie
 
-import "fmt"
 import "strings"
 
 // Node represents a node in the Trie
@@ -54,10 +53,6 @@ func (t *Trie) get(x *Node, s string, d int) *Node {
         return x
     }
     c := int(s[d]) - t.OFFSET
-
-    if c > 25 {
-        fmt.Printf("%c\n",s[d])
-    }
 
     return t.get(x.Next[c], s, d+1)
 }

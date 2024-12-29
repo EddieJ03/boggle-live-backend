@@ -1,25 +1,47 @@
 package main
 
+import "fmt"
 
 func broadcastEndGame(room *Room, player1 float64, player2 float64) {
 	// delete room first, then send endgame to clients
-	clientRoomsLock.Lock() 
+	clientRoomsLock.Lock()
 
 	delete(clientRooms, room.RoomName)
-	
+
 	clientRoomsLock.Unlock()
 
-	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
-		"type": "endgame",
-        "player1": player1,
-    	"player2": player2,
-	})
+	gameOverMessage := "GAME OVER!"
 
-	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
-		"type": "endgame",
-    	"player1": player1,
-        "player2": player2,
-	})
+	if room.Player1MissedTurns == 3 {
+		gameOverMessage = gameOverMessage + "\nPlayer 1 Missed 3 Consecutive Turns"
+	} else if room.Player2MissedTurns == 3 {
+		gameOverMessage = gameOverMessage + "\nPlayer 2 Missed 3 Consecutive Turns"
+	} else {
+		gameOverMessage = gameOverMessage + "\nAll possible words found!"
+	}
+
+	sendMessage(room, gameOverMessage)
+
+	if room.Player1WS != nil {
+		room.Player1WS.Conn.WriteJSON(map[string]interface{}{
+			"type":    "endgame",
+			"player1": player1,
+			"player2": player2,
+		})
+	}
+	
+	if room.Player2WS != nil {
+		room.Player2WS.Conn.WriteJSON(map[string]interface{}{
+			"type":    "endgame",
+			"player1": player1,
+			"player2": player2,
+		})
+	}
+	
+	if room.KafkaWriter != nil {
+		deleteTopic(room.RoomName)
+		room.KafkaWriter.Close()
+	}
 }
 
 func broadcastDisconnect(roomName string) {
@@ -32,14 +54,21 @@ func broadcastDisconnect(roomName string) {
 	}
 
 	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
-		"type":   "disconnected",
+		"type": "disconnected",
 	})
 	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
-		"type":   "disconnected",
+		"type": "disconnected",
 	})
+
+	sendMessage(room, "Someone disconnected! This game has ended.")
+	
+	if room.KafkaWriter != nil {
+		deleteTopic(room.RoomName)
+		room.KafkaWriter.Close()
+	}
 }
 
-func broadcastSwitch(roomName string, player int, word string) {
+func broadcastSwitch(roomName string, curr_player int, next_player int, word string) {
 	clientRoomsLock.RLock()
 	defer clientRoomsLock.RUnlock()
 
@@ -50,14 +79,20 @@ func broadcastSwitch(roomName string, player int, word string) {
 
 	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
 		"type":   "switch",
-		"player": player,
-		"word": word,
+		"player": next_player,
+		"word":   word,
 	})
 	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
 		"type":   "switch",
-		"player": player,
-		"word": word,
+		"player": next_player,
+		"word":   word,
 	})
+
+	if word == "" {
+		sendMessage(room, fmt.Sprintf("Player %d could not find word. Switching from Player %d to %d", curr_player, curr_player, next_player))
+	} else {
+		sendMessage(room, fmt.Sprintf("Player %d found word %s. Switching from Player %d to %d", curr_player, word, curr_player, next_player))
+	}
 }
 
 func broadcastStart(roomName string) {
@@ -70,13 +105,15 @@ func broadcastStart(roomName string) {
 	}
 
 	room.Player1WS.Conn.WriteJSON(map[string]interface{}{
-		"type":   "start",
-		"countdown": [2]int{3,0},
-		"gameInfo": *room,
+		"type":      "start",
+		"countdown": [2]int{3, 0},
+		"gameInfo":  *room,
 	})
 	room.Player2WS.Conn.WriteJSON(map[string]interface{}{
-		"type":   "start",
-		"countdown": [2]int{3,0},
-		"gameInfo": *room,
+		"type":      "start",
+		"countdown": [2]int{3, 0},
+		"gameInfo":  *room,
 	})
+
+	sendMessage(room, "Game start!")
 }

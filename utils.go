@@ -1,12 +1,18 @@
 package main
 
 import (
-	"fmt"
+	"context"
 	"go_boggle_server/trie"
+	"log"
 	"math/rand"
 	"sync"
 	"time"
+
+	"github.com/segmentio/kafka-go"
 )
+
+// change this endpoint depending on where server is (ex: localhost:9094)
+var endpoint string = "52.160.91.109:9094"
 
 func startGame(room *Room) {
 	roomName := room.RoomName
@@ -60,7 +66,7 @@ func initGame(roomName string, trie *trie.Trie, random bool) {
 
 	clientRoomsLock.Lock()
     defer clientRoomsLock.Unlock()
-
+	
 	room := &Room{
 		AllCharacters: allCharacters,
 		AllValidWords: allValidWords,
@@ -76,15 +82,30 @@ func initGame(roomName string, trie *trie.Trie, random bool) {
 		Player2MissedTurns: 0,
 	}
 
+	_, topic_err := kafka.DialLeader(context.Background(), "tcp", endpoint, roomName, 0) // this creates topic since the kafka config is set to auto topic creation
+	if topic_err != nil {
+		room.KafkaWriter = nil
+		log.Printf("failed to create topic: %s\n", topic_err.Error())
+	} else {
+		room.KafkaWriter = &kafka.Writer{
+			Addr:     kafka.TCP(endpoint),
+			Topic:   roomName,
+			RequiredAcks: kafka.RequireAll,
+			Async:        true,
+			BatchSize:    1,
+		}
+	}
+
 	clientRooms[roomName] = room
+
+	// fmt.Println("successfully created room!")
 
 	// if random, also add to the list
 	if(random) {
-		fmt.Println("added to random!")
+		// fmt.Println("added to random!")
 		randomRooms = append(randomRooms, room)
 	}
 }
-
 
 func dfs(i, j int, constGrid [][]string, trie *trie.Trie) []string {
 	s := Tile{i, j}
@@ -237,3 +258,28 @@ func popFirstRoom(rooms []*Room) ([]*Room, *Room) {
     return rooms[1:], firstRoom
 }
 
+func sendMessage(room *Room, message string) {
+	if room.KafkaWriter == nil {
+		return
+	}
+
+	room.KafkaWriter.WriteMessages(
+		context.Background(),
+		kafka.Message{
+			Value: []byte(message),
+		},
+	)
+}
+
+func deleteTopic(topic string) {
+	conn, err := kafka.Dial("tcp", endpoint)
+
+	if err != nil {
+		log.Println("failed to dial to remove topic " + topic)
+		return
+	}
+
+	defer conn.Close()
+
+	conn.DeleteTopics(topic)
+}
