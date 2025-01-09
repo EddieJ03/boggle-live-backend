@@ -12,7 +12,7 @@ import (
 )
 
 // change this endpoint depending on where server is (ex: localhost:9094)
-var endpoint string = "52.160.91.109:9094"
+var endpoint string = "37.117.12.142:9094"
 
 func startGame(room *Room) {
 	roomName := room.RoomName
